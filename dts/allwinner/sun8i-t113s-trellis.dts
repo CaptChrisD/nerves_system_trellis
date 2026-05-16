@@ -101,21 +101,16 @@
 		regulator-always-on;
 	};
 
-	/*
-	 * DP83825I PHY power-down control. ETH_PWRDN on PE12 is active-low:
-	 * driving it LOW takes the PHY out of power-down. regulator-fixed
-	 * with no enable-active-high defaults to active-low semantics
-	 * (writes 0 to enable), and GPIO_ACTIVE_HIGH leaves the descriptor
-	 * uninverted, so the physical pin is driven low when the regulator
-	 * is enabled.
-	 */
+	/* PE12 -> DP83825I pin 3 (INT/PWRDN_N): HIGH = normal, LOW = power-down. */
 	reg_phy: regulator-phy {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc-phy";
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
 		vin-supply = <&reg_3v3>;
-		gpio = <&pio 4 12 GPIO_ACTIVE_HIGH>; /* PE12 ETH_PWRDN */
+		gpio = <&pio 4 12 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <1000>;
 		regulator-boot-on;
 	};
 };
