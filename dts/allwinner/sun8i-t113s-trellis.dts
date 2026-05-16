@@ -40,37 +40,38 @@
 
 		led-eth {
 			function = LED_FUNCTION_LAN;
+			label = "mm-fseries:blue:ethernet";
 			gpios = <&pio 3 9 GPIO_ACTIVE_HIGH>; /* PD9 */
 			linux,default-trigger = "netdev";
 		};
 
 		led-nmea {
-			label = "nmea";
+			label = "mm-fseries:green:can";
 			gpios = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
 		};
 
 		led-audio {
-			label = "audio";
+			label = "mm-fseries:green:audio";
 			gpios = <&pio 1 7 GPIO_ACTIVE_HIGH>; /* PB7 */
 		};
 
 		led-t1 {
-			label = "t1";
+			label = "mm-fseries:amber:trigger1";
 			gpios = <&pio 3 16 GPIO_ACTIVE_HIGH>; /* PD16 */
 		};
 
 		led-t2 {
-			label = "t2";
+			label = "mm-fseries:amber:trigger2";
 			gpios = <&pio 3 17 GPIO_ACTIVE_HIGH>; /* PD17 */
 		};
 
 		led-t3 {
-			label = "t3";
+			label = "mm-fseries:amber:trigger2";
 			gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
 		};
 
 		led-t4 {
-			label = "t4";
+			label = "mm-fseries:amber:trigger4";
 			gpios = <&pio 3 19 GPIO_ACTIVE_HIGH>; /* PD19 */
 		};
 	};
