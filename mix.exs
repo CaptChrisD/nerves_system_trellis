@@ -2,7 +2,7 @@ defmodule NervesSystemTrellis.MixProject do
   use Mix.Project
 
   @github_organization "protolux-electronics"
-  @app :nerves_system_trellis
+  @app :nerves_system_trellis_mm
   @source_url "https://github.com/#{@github_organization}/#{@app}"
   @version Path.join(__DIR__, "VERSION")
            |> File.read!()
