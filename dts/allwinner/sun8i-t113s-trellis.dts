@@ -320,7 +320,15 @@
 	phy-mode = "rmii";
 	phy-handle = <&ext_phy>;
 	phy-supply = <&reg_phy>;
+	nvmem-cells = <&mac_address>;
+	nvmem-cell-names = "mac-address";
 	status = "okay";
+};
+
+&sid {
+	mac_address: mac-address@0 {
+		reg = <0x0 6>;
+	};
 };
 
 &mdio {
