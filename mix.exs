@@ -67,7 +67,7 @@ defmodule NervesSystemTrellis.MixProject do
   defp deps do
     [
       {:nerves, "~> 1.11", runtime: false},
-      {:nerves_system_br, "1.33.4", runtime: false},
+      {:nerves_system_br, "1.33.9", runtime: false},
       {:nerves_toolchain_armv7_nerves_linux_gnueabihf, "~> 13.2.0", runtime: false},
       {:nerves_system_linter, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.22", only: :docs, runtime: false}
@@ -92,7 +92,7 @@ defmodule NervesSystemTrellis.MixProject do
   defp package do
     [
       files: package_files(),
-      licenses: ["Apache-2.0"],
+      licenses: ["GPL-2.0-only", "GPL-2.0-or-later"],
       links: %{"GitHub" => @source_url}
     ]
   end
@@ -111,7 +111,7 @@ defmodule NervesSystemTrellis.MixProject do
       "CHANGELOG.md",
       "fwup-ops.conf",
       "fwup.conf",
-      "LICENSE",
+      "LICENSES",
       "mix.exs",
       "nerves_defconfig",
       "post-build.sh",

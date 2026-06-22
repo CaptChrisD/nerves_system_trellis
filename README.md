@@ -1,6 +1,8 @@
 # Nerves System Trellis
 
 [![Hex version](https://img.shields.io/hexpm/v/nerves_system_trellis.svg "Hex version")](https://hex.pm/packages/nerves_system_trellis)
+[![CI](https://github.com/nerves-project/nerves_system_trellis/actions/workflows/ci.yml/badge.svg)](https://github.com/nerves-project/nerves_system_trellis/actions/workflows/ci.yml)
+[![REUSE status](https://api.reuse.software/badge/github.com/nerves-project/nerves_system_trellis)](https://api.reuse.software/info/github.com/nerves-project/nerves_system_trellis)
 
 This project provides the base Nerves System configuration for the Trellis
 hardware platform. Unlike traditional single-board computers, Trellis is
@@ -45,7 +47,7 @@ Trellis-based hardware.
 | CPU            | 1.2 GHz Dual-core ARM Cortex-A7                                     |
 | Memory         | 256 MB Integrated DDR3                                              |
 | Storage        | SDIO Flash (on MMC0)                                                |
-| Linux kernel   | 6.12 with patches                                                   |
+| Linux kernel   | 6.18 with patches                                                   |
 | IEx terminal   | UART `ttyS4`                                                        |
 | GPIO, I2C, SPI | Supported via [Elixir Circuits](https://github.com/elixir-circuits) |
 | WiFi           | Various Realtek modules supported                                   |
