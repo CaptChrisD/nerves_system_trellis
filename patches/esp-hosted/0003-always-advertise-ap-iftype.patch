@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: [PATCH] Always advertise NL80211_IFTYPE_AP
+
+Upstream gates the AP interface type behind CONFIG_AP_MODE, which the
+host/Makefile only defines when CONFIG_AP_SUPPORT=y is passed on the make
+command line. Buildroot's kernel-module infrastructure does not feed that
+variable into the Kbuild compile, so -DCONFIG_AP_MODE is never set and
+wlan0 comes up advertising only NL80211_IFTYPE_STATION -- wpa_supplicant
+mode=2 (SoftAP) then has no AP iftype to use and no beacon is sent.
+
+The AP cfg80211 ops (start_ap/change_beacon/stop_ap/...) are always
+compiled regardless of CONFIG_AP_MODE; only this interface_modes line is
+guarded. Advertise AP unconditionally so SoftAP works without relying on
+the make-time define.
+
+Signed-off-by: Chris Dutton <chris@bigcove.io>
+---
+--- a/esp_hosted_ng/host/esp_cfg80211.c
++++ b/esp_hosted_ng/host/esp_cfg80211.c
+@@ -1204,10 +1204,8 @@
+
+ 	set_wiphy_dev(wiphy, esp_dev->dev);
+
+-	wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION);
+-#ifdef CONFIG_AP_MODE
+-	wiphy->interface_modes |= BIT(NL80211_IFTYPE_AP);
+-#endif
++	wiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
++				 BIT(NL80211_IFTYPE_AP);
+ 	wiphy->bands[NL80211_BAND_2GHZ] = &esp_wifi_bands_2ghz;
+ 	if (adapter->chipset == ESP_FIRMWARE_CHIP_ESP32C5) {
+ 		wiphy->bands[NL80211_BAND_5GHZ] = &esp_wifi_bands_5ghz;
+--
+2.43.0

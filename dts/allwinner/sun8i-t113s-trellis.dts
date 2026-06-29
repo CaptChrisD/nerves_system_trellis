@@ -56,6 +56,7 @@
 		led-nmea {
 			label = "mm-fseries:green:can";
 			gpios = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
+			linux,default-trigger = "netdev";
 		};
 
 		led-audio {

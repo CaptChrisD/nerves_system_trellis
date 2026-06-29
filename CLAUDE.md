@@ -68,5 +68,5 @@ MBR → SPL+U-Boot (offset 16) → U-Boot env (offset 8192) → Rootfs A → Roo
 
 ### Runtime Configuration
 
-- `rootfs_overlay/etc/erlinit.config` — Erlang VM startup (console ttyS4, hostname `wisteria-<serial>`, mounts app partition)
+- `rootfs_overlay/etc/erlinit.config` — Erlang VM startup (console ttyS4, hostname `nerves-<serial>`, mounts app partition)
 - `rootfs_overlay/etc/boardid.config` — Serial number sources (ATECC508A first, then SoC SID fallback)

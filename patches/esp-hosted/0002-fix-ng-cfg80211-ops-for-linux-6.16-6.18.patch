@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Mon, 1 Jan 2024 00:00:00 +0000
+Subject: [PATCH] Fix(ng): cfg80211_ops signatures for Linux 6.16-6.18
+
+Linux 6.16 added an "int radio_idx" parameter to several cfg80211_ops
+callbacks as part of the per-wiphy multi-radio support. esp_hosted_ng
+1.0.4.0.0 predates this, so building against Linux >= 6.16 fails with
+-Werror=incompatible-pointer-types on set_tx_power, get_tx_power and
+set_wiphy_params.
+
+Add the radio_idx parameter (unused by this single-radio driver),
+guarded by LINUX_VERSION_CODE so older kernels still build. The
+existing 6.14 link_id guard on get_tx_power is preserved.
+
+Signed-off-by: Chris Dutton <chris@bigcove.io>
+---
+--- a/esp_hosted_ng/host/esp_cfg80211.c
++++ b/esp_hosted_ng/host/esp_cfg80211.c
+@@ -717,6 +717,9 @@
+ 
+ static int esp_cfg80211_set_tx_power(struct wiphy *wiphy,
+ 				     struct wireless_dev *wdev,
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
++				     int radio_idx,
++#endif
+ 				     enum nl80211_tx_power_setting type, int mbm)
+ {
+ 	struct esp_adapter *adapter = esp_get_adapter();
+@@ -794,6 +797,9 @@
+ 
+ static int esp_cfg80211_get_tx_power(struct wiphy *wiphy,
+ 				     struct wireless_dev *wdev,
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
++				     int radio_idx,
++#endif
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0))
+ 				     unsigned int link_id,
+ #endif
+@@ -821,7 +827,11 @@
+ 	return 0;
+ }
+ 
+-static int esp_cfg80211_set_wiphy_params(struct wiphy *wiphy, u32 changed)
++static int esp_cfg80211_set_wiphy_params(struct wiphy *wiphy,
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 16, 0))
++                                         int radio_idx,
++#endif
++                                         u32 changed)
+ {
+ 	esp_dbg("\n");
+ 	return 0;
+-- 
+2.43.0
+
