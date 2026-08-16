@@ -60,6 +60,9 @@ MBR → SPL+U-Boot (offset 16) → U-Boot env (offset 8192) → Rootfs A → Roo
 - **USB:** OTG (USB-C for FEL mode), USB host (EHCI/OHCI)
 - **LEDs:** Green (heartbeat), Blue (user-controllable)
 - **Identity:** ATECC508A crypto chip on I2C2 for serial numbers
+- **RTC:** MCP7940N on I2C2 at 0x6F (`rtc-ds1307`). The `aliases` block pins it
+  as `rtc0` and the SoC RTC as `rtc1` — both are needed, or the SoC RTC (which
+  has no battery here) probes first and becomes the `RTC_HCTOSYS` device.
 
 ### Post-Build Pipeline
 

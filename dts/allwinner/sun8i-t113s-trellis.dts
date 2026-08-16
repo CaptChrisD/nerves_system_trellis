@@ -296,6 +296,19 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c2_pd_pins>;
 	status = "okay";
+
+	/*
+	 * The MCP7940N battery-backed RTC lives here at 0x6F, but is deliberately
+	 * NOT given a node. Binding it with rtc-ds1307 put kernel I2C traffic on
+	 * this bus ~230ms before erlinit runs boardid, and boardid then failed to
+	 * read the ATECC508A at 0x60 and fell back to the SoC SID, changing the
+	 * device hostname. Reproduced on 3/3 cold boots.
+	 *
+	 * The RTC is driven entirely from userspace instead, by
+	 * Firmware.RTC.MCP7940N via `config :nerves_time, rtc:`. That runs well
+	 * after boardid, so it cannot disturb HSM identity. The only thing given
+	 * up is RTC_HCTOSYS setting the clock in the ~2s before the BEAM starts.
+	 */
 };
 
 /* ESP-Hosted control */
