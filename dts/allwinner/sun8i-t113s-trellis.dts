@@ -75,7 +75,7 @@
 		};
 
 		led-t3 {
-			label = "mm-fseries:amber:trigger2";
+			label = "mm-fseries:amber:trigger3";
 			gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
 		};
 
