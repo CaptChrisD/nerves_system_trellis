@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+// SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
 // Copyright (C) 2022 Arm Ltd.
 
 #include <dt-bindings/interrupt-controller/irq.h>
@@ -72,20 +72,6 @@
 	clock-frequency = <24000000>;
 };
 
-/* eMMC */
-&mmc0 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&mmc0_pins>;
-	vmmc-supply = <&reg_3v3>;
-	disable-wp;
-	bus-width = <4>;
-	status = "okay";
-};
-
-&ohci1 {
-	status = "okay";
-};
-
 &pio {
 	vcc-pb-supply = <&reg_3v3>;
 	vcc-pc-supply = <&reg_3v3>;
@@ -94,8 +80,15 @@
 	vcc-pf-supply = <&reg_3v3>;
 	vcc-pg-supply = <&reg_3v3>;
 
+	/* Goatmire Badge */
 	uart4_pd_pins: uart4-pd-pins {
 		pins = "PD7", "PD8";
+		function = "uart4";
+	};
+
+	/* NSK */
+	uart4_pg_pins: uart4-pg-pins {
+		pins = "PG2", "PG3";
 		function = "uart4";
 	};
 };
@@ -107,7 +100,12 @@
 	status = "okay";
 };
 
-&ehci1 {
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins>;
+	vmmc-supply = <&reg_3v3>;
+	disable-wp;
+	bus-width = <4>;
 	status = "okay";
 };
 
@@ -119,5 +117,13 @@
 
 &usbphy {
 	usb1_vbus-supply = <&reg_vcc5v>;
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
 	status = "okay";
 };

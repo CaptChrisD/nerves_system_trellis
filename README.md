@@ -73,6 +73,18 @@ If you need custom modifications to this system for your device, see the
 [Nerves documentation on customizing
 systems](https://hexdocs.pm/nerves/customizing-systems.html).
 
+## U-Boot
+
+It's possible to break into U-Boot via the debug UART by holding down the enter
+key when booting.
+
+When in U-Boot, it's possible to expose the flash as a mass storage device over
+USB by running the following:
+
+```
+ums 0 mmc 0:0
+```
+
 ## Linux kernel
 
 The Linux kernel is built from the mainline 6.12 release with patches for the
@@ -82,3 +94,14 @@ Allwinner T113-S4. The default kernel configuration is in `linux_defconfig`.
 
 Thank you to Connor Rigby who brought up initial support for the Allwinner
 T113-S3.
+
+## Metro Marine F-Series fork
+
+This fork (`nerves_system_trellis_mm`) targets the Metro Marine F-Series Gateway
+board. Its device tree is `dts/allwinner/sun8i-t113s-mm-fseries.dts`, booted via
+the `mm-fseries` FIT configuration (the default in `uboot/uboot.env`). The
+U-Boot console is on PD7/PD8. Upstream's Trellis / Nerves Starter Kit trees are
+kept untouched to ease merging from `nerves-project/nerves_system_trellis`.
+
+Boards running firmware older than `0.5.0-mm.1` must be reflashed; the boot
+layout is not OTA-compatible with the previous extlinux-based releases.

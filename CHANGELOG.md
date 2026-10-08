@@ -12,6 +12,93 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v0.5.0-mm.1
+
+Rebase the Metro Marine F-Series system onto upstream
+[nerves_system_trellis v0.5.0](https://github.com/nerves-project/nerves_system_trellis/releases/tag/v0.5.0)
+(upstream moved from `protolux-electronics` to `nerves-project`).
+
+IMPORTANT: This is a non-backwards compatible release. Devices running any
+`0.3.1-mm.x` firmware must be reflashed (FEL/SD); they cannot OTA to this
+release. The boot layout changed from extlinux in the rootfs to raw FIT image
+slots, and firmware validation now uses U-Boot's `upgrade_available`/`bootcount`
+rollback instead of `nerves_fw_validated`.
+
+* Changes
+  * The F-Series device tree now lives in its own file,
+    `dts/allwinner/sun8i-t113s-mm-fseries.dts`, selected by the `mm-fseries`
+    FIT configuration (`trellis.its`) and `fit_config=mm-fseries` in
+    `uboot/uboot.env`. Upstream's `sun8i-t113s-trellis.dts` and NSK trees are
+    carried unmodified and are not booted.
+  * U-Boot console stays on PD7/PD8 (`uart4_pd_pins`); U-Boot status LED stays on
+    PD18. Upstream switched its defaults to the Nerves Starter Kit pins.
+  * `CONFIG_POWER_RESET` / `CONFIG_POWER_RESET_GPIO` from upstream.
+  * esp-hosted host driver stays pinned to ng-1.0.4.0.0 (it must match the
+    firmware on the ESP32-C6). Buildroot 2026.05 moved its package to 1.0.6 and
+    dropped both the `ESP_SLAVE` make option and the "Fix ng build for 6.15"
+    Makefile patch, so `package/esp-hosted/esp-hosted.mk` now passes `ESP_SLAVE`
+    itself and the patch is carried in `patches/esp-hosted/`. The removed
+    `BR2_PACKAGE_ESP_HOSTED_TARGET_ESP32C6` option is dropped from `nerves_defconfig`.
+  * All prior `-mm` customizations are retained: esp-hosted SDIO WiFi package
+    and patches, DWMAC ethernet + DP83825I PHY, CAN, USB mass storage/VFAT, LED
+    triggers, modprobe/pre-run overlay, product/author metadata.
+
+* Package updates
+  * nerves_system_br 1.34.4, GCC 15.3.0, U-Boot 2025.10 (see upstream v0.4.0 to
+    v0.5.0 entries below)
+
+## v0.5.0
+
+IMPORTANT: This is a non-backwards compatible release. You will have to reflash
+your NSK or Goatmire badge.
+
+* Changes
+  * Change U-Boot failure recovery to use U-Boot's upgrade_available feature.
+    This fixes an issue preventing first-boot rollback.
+  * Use FIT images rather than read kernels from the rootfs. This adds
+    flexibility to kernel/dts configurations and possible future initrd use.
+  * Allow booting from EROFS root filesystems. This will be supported with
+    Nerves 2.
+  * Trim U-Boot wait time to 0 seconds. It's still possible to break into
+    U-Boot, and this saves 2 seconds of boot time.
+  * Add balance bot device tree configuration. This is not enabled by default.
+  * Add a redundant U-Boot environment block to protect against corruption
+    there.
+  * Allow Nerves 2 pre-releases to be used
+
+* Package updates
+  * [nerves_system_br 1.34.4](https://github.com/nerves-project/nerves_system_br/releases/tag/v1.34.4)
+
+## v0.4.2
+
+This is a security and bug fix release.
+
+* Changes
+  * Include rootfs.tar for use with Nerves 2.0 development builds (ignored by Nerves 1.x)
+
+* Package updates
+  * [nerves_system_br 1.34.1](https://github.com/nerves-project/nerves_system_br/releases/tag/v1.34.1)
+
+## v0.4.1
+
+* Changes
+  * Disable UART0 to avoid conflict with expansion GPIOs. In the future, the
+    plan is to allow it to be enabled via a DTS overlay.
+  * Add GPIO labels for PE2 - PE13 to make it easier to refer to them with
+    Circuits.GPIO.
+
+## v0.4.0
+
+This is a major update with support for the Nerves Starter Kit. It still
+supports the Goatmire badge on OTA updates from previous versions and if you
+modify the U-Boot start script before flashing a new device. The plan is to
+autodetect the device in the next release.
+
+* Changes
+  * linux 6.18.35
+  * GCC 15.3.0
+  * nerves_system_br v1.34.0
+
 ## v0.3.1-mm.6
 
 Back out the kernel-side MCP7940N binding added in mm.5. Keeping

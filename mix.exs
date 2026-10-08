@@ -66,9 +66,9 @@ defmodule NervesSystemTrellis.MixProject do
 
   defp deps do
     [
-      {:nerves, "~> 1.11", runtime: false},
-      {:nerves_system_br, "1.33.9", runtime: false},
-      {:nerves_toolchain_armv7_nerves_linux_gnueabihf, "~> 13.2.0", runtime: false},
+      {:nerves, "~> 1.11 or ~> 2.0 or ~> 2.0.0-dev", runtime: false},
+      {:nerves_system_br, "1.34.4", runtime: false},
+      {:nerves_toolchain_armv7_nerves_linux_gnueabihf, "~> 15.3.0", runtime: false},
       {:nerves_system_linter, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.22", only: :docs, runtime: false}
     ]
@@ -93,7 +93,11 @@ defmodule NervesSystemTrellis.MixProject do
     [
       files: package_files(),
       licenses: ["GPL-2.0-only", "GPL-2.0-or-later"],
-      links: %{"GitHub" => @source_url}
+      links: %{
+        "GitHub" => @source_url,
+        "REUSE Compliance" =>
+          "https://api.reuse.software/info/github.com/#{@github_organization}/#{@app}"
+      }
     ]
   end
 
@@ -108,6 +112,7 @@ defmodule NervesSystemTrellis.MixProject do
       "external.mk",
       "package",
       "patches",
+      "trellis.its",
       "CHANGELOG.md",
       "fwup-ops.conf",
       "fwup.conf",

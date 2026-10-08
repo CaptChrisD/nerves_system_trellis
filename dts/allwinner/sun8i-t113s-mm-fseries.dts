@@ -1,0 +1,373 @@
+// SPDX-License-Identifier: (GPL-2.0-or-later OR MIT)
+// Copyright (C) 2022 Arm Ltd.
+// Copyright (C) 2024 Connor Rigby <connorr@hey.com>
+
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/dts-v1/;
+
+#include <arm/allwinner/sun8i-t113s.dtsi>
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "Metro Marine F-Series Gateway";
+	compatible = "protolux,trellis-t113", "allwinner,sun8i-t113s", "allwinner,sun8i";
+
+	aliases {
+		serial1 = &uart1;
+		serial2 = &uart2;
+		serial3 = &uart3;
+		serial4 = &uart4;
+		/*
+		 * Pin MMC controller indices so the on-board storage chip is always
+		 * mmcblk0 and the ESP-Hosted SDIO WiFi is always mmcblk1. Without
+		 * these aliases the Linux MMC core assigns host->index by probe
+		 * completion order, which races between the two controllers.
+		 */
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+	};
+
+	chosen {
+		stdout-path = "serial4:115200n8";
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-status {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_STATUS;
+			gpios = <&pio 2 7 GPIO_ACTIVE_HIGH>; /* PC7 */
+			linux,default-trigger = "heartbeat";
+		};
+
+		led-eth {
+			function = LED_FUNCTION_LAN;
+			label = "mm-fseries:blue:ethernet";
+			gpios = <&pio 3 9 GPIO_ACTIVE_HIGH>; /* PD9 */
+			linux,default-trigger = "netdev";
+		};
+
+		led-nmea {
+			label = "mm-fseries:green:can";
+			gpios = <&pio 3 6 GPIO_ACTIVE_HIGH>; /* PD6 */
+			linux,default-trigger = "netdev";
+		};
+
+		led-audio {
+			label = "mm-fseries:green:audio";
+			gpios = <&pio 1 7 GPIO_ACTIVE_HIGH>; /* PB7 */
+		};
+
+		led-t1 {
+			label = "mm-fseries:amber:trigger1";
+			gpios = <&pio 3 16 GPIO_ACTIVE_HIGH>; /* PD16 */
+		};
+
+		led-t2 {
+			label = "mm-fseries:amber:trigger2";
+			gpios = <&pio 3 17 GPIO_ACTIVE_HIGH>; /* PD17 */
+		};
+
+		led-t3 {
+			label = "mm-fseries:amber:trigger3";
+			gpios = <&pio 3 18 GPIO_ACTIVE_HIGH>; /* PD18 */
+		};
+
+		led-t4 {
+			label = "mm-fseries:amber:trigger4";
+			gpios = <&pio 3 19 GPIO_ACTIVE_HIGH>; /* PD19 */
+		};
+	};
+
+	reg_vcc5v: regulator-5v {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-5v";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		regulator-always-on;
+	};
+
+	reg_3v3: regulator-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&reg_vcc5v>;
+		regulator-always-on;
+	};
+
+	reg_vcc_core: regulator-core {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-core";
+		regulator-min-microvolt = <880000>;
+		regulator-max-microvolt = <880000>;
+		vin-supply = <&reg_vcc5v>;
+		regulator-always-on;
+	};
+
+	/* PE12 -> DP83825I pin 3 (INT/PWRDN_N): HIGH = normal, LOW = power-down. */
+	reg_phy: regulator-phy {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc-phy";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&reg_3v3>;
+		gpio = <&pio 4 12 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <1000>;
+		regulator-boot-on;
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&cpu1 {
+	cpu-supply = <&reg_vcc_core>;
+};
+
+&rtc {
+	status = "okay";
+};
+
+&dcxo {
+	clock-frequency = <24000000>;
+};
+
+&wdt {
+	status = "okay";
+};
+
+&pio {
+	vcc-pb-supply = <&reg_3v3>;
+	vcc-pc-supply = <&reg_3v3>;
+	vcc-pd-supply = <&reg_3v3>;
+	vcc-pe-supply = <&reg_3v3>;
+	vcc-pf-supply = <&reg_3v3>;
+	vcc-pg-supply = <&reg_3v3>;
+
+	gpio-line-names =
+		/* PA */
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		/* PB */
+		"","","CAN0_TX","CAN0_RX","","","","AUDIO_LED",
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		/* PC */
+		"","","","","BOOT_SEL0","BOOT_SEL1","","STATUS_LED",
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		/* PD */
+		"","UART2_TX","UART2_RX","STM_BOOT","STM_RESET","","NMEA_LED","UART4_TX",
+		"UART4_RX","ETH_LED","","TRIG_4","TRIG_3","SOFT_RESET","TRIG_2","TRIG_1",
+		"T1_LED","T2_LED","T3_LED","T4_LED","I2C2_SCL","I2C2_SDA","","",
+		"","","","","","","","",
+		/* PE */
+		"RMII_CRS_DV","RMII_RXD0","RMII_RXD1","RMII_TXCK","RMII_TXD0","RMII_TXD1","RMII_TXEN","RMII_RXER",
+		"MDC","MDIO","","","ETH_PWRDN","ETH_RESET","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		/* PF */
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		"","","","","","","","",
+		/* PG */
+		"MMC1_CLK","MMC1_CMD","MMC1_D0","MMC1_D1","MMC1_D2","MMC1_D3","UART1_TX","UART1_RX",
+		"UART3_TX","UART3_RX","ESP_BOOT","ESP_RESET","","","","",
+		"","","","","","","","",
+		"","","","","","","","";
+
+	uart4_pd_pins: uart4-pd-pins {
+		pins = "PD7", "PD8";
+		function = "uart4";
+	};
+
+	/omit-if-no-ref/
+	uart2_pd_pins: uart2-pd-pins {
+		pins = "PD1", "PD2";
+		function = "uart2";
+	};
+
+	/omit-if-no-ref/
+	uart3_pg_pins: uart3-pg-pins {
+		pins = "PG8", "PG9";
+		function = "uart3";
+	};
+
+	/omit-if-no-ref/
+	i2c2_pd_pins: i2c2-pd-pins {
+		pins = "PD20", "PD21";
+		function = "i2c2";
+	};
+};
+
+/* console */
+&uart4 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart4_pd_pins>;
+	status = "okay";
+};
+
+/* STM32 coprocessor link */
+&uart2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart2_pd_pins>;
+	status = "okay";
+};
+
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins>;
+	vmmc-supply = <&reg_3v3>;
+	disable-wp;
+	bus-width = <4>;
+	max-frequency = <50000000>;
+	non-removable;
+	broken-cd;
+	no-1-8-v;
+	status = "okay";
+};
+
+&gpadc {
+	status = "okay";
+	channel@0 {
+        reg = <0>;
+    };
+
+};
+
+&usb_otg {
+	dr_mode = "peripheral";
+	status = "okay";
+};
+
+&usbphy {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&spi0 {
+	status = "disabled";
+};
+
+&spi1 {
+	status = "disabled";
+};
+
+&mixer0 {
+	status = "disabled";
+};
+
+&tcon_top {
+	status = "disabled";
+};
+
+&tcon_lcd0 {
+	status = "disabled";
+};
+
+&can0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&can0_pins>;
+	status = "okay";
+};
+
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pd_pins>;
+	status = "okay";
+
+	/*
+	 * The MCP7940N battery-backed RTC lives here at 0x6F, but is deliberately
+	 * NOT given a node. Binding it with rtc-ds1307 put kernel I2C traffic on
+	 * this bus ~230ms before erlinit runs boardid, and boardid then failed to
+	 * read the ATECC508A at 0x60 and fell back to the SoC SID, changing the
+	 * device hostname. Reproduced on 3/3 cold boots.
+	 *
+	 * The RTC is driven entirely from userspace instead, by
+	 * Firmware.RTC.MCP7940N via `config :nerves_time, rtc:`. That runs well
+	 * after boardid, so it cannot disturb HSM identity. The only thing given
+	 * up is RTC_HCTOSYS setting the clock in the ~2s before the BEAM starts.
+	 */
+};
+
+/* ESP-Hosted control */
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pg6_pins>;
+	status = "okay";
+};
+
+/* Bluetooth (ESP-Hosted) */
+&uart3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart3_pg_pins>;
+	status = "okay";
+};
+
+&mmc1 {
+	vmmc-supply = <&reg_3v3>;
+	vqmmc-supply = <&reg_3v3>;
+	bus-width = <4>;
+	non-removable;
+	broken-cd;
+	no-1-8-v;
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc1_pins>;
+	status = "okay";
+};
+
+&emac {
+	pinctrl-names = "default";
+	pinctrl-0 = <&rmii_pe_pins>;
+	phy-mode = "rmii";
+	phy-handle = <&ext_phy>;
+	phy-supply = <&reg_phy>;
+	nvmem-cells = <&mac_address>;
+	nvmem-cell-names = "mac-address";
+	status = "okay";
+};
+
+&sid {
+	mac_address: mac-address@0 {
+		reg = <0x0 6>;
+	};
+};
+
+&mdio {
+	ext_phy: ethernet-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0>;
+		reset-gpios = <&pio 4 13 GPIO_ACTIVE_LOW>; /* PE13 ETH_RESET */
+		reset-assert-us = <10000>;
+		reset-deassert-us = <50000>;
+	};
+};
+
+&crypto {
+	status = "okay";
+};
+
+&pwm {
+    status = "disabled";
+};
