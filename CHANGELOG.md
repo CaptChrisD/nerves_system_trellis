@@ -12,6 +12,15 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v0.5.0-mm.2
+
+* Changes
+  * nerves_system_br 1.35.1: Buildroot 2026.08 and Erlang/OTP 29.1.1. OTP
+    29.0.6's ssh daemon rejected any `subsystem` request preceded by an `env`
+    request on the channel (OTP-20371), which broke `mix upload` and sftp from
+    macOS clients that send `LANG`/`LC_*`. Fixed in 29.1.1.
+  * `BR2_TOOLCHAIN_EXTERNAL_GCC_15=y` from upstream main.
+
 ## v0.5.0-mm.1
 
 Rebase the Metro Marine F-Series system onto upstream
