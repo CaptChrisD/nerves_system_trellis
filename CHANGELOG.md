@@ -68,8 +68,11 @@ moved to `wlan1`; the old app on this system will fail to open `ESP_RESET`.
     `ieee80211_send_mgmt_internal(WIFI_IF_AP)` instead of the STA path (which
     hung the Wi-Fi task); the merged image now depends on the binaries it
     merges.
+    A STA scan while the AP is up now runs the chip in AP+STA for the scan
+    (the setup UI could not list networks in AP mode: STA_SCAN returned EBUSY),
+    and the firmware version string is the short commit hash.
     Proposed upstream as https://pushin.eu/gus/trellis-radio/pulls/3 (fork
-    `captchrisd/trellis-radio`, branch `mm-ap-mode`, 16 commits); the patches and
+    `captchrisd/trellis-radio`, branch `mm-ap-mode`, 18 commits); the patches and
     blob here are generated from that branch head.
   * `BR2_GLOBAL_PATCH_DIR` is back to upstream's value and `patches/` is gone;
     the fork no longer carries any Buildroot package patches, so

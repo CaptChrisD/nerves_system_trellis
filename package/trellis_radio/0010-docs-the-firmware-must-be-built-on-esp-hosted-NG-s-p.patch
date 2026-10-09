@@ -1,7 +1,7 @@
 From 828ce7924be1108f24517fc8719ea9bfe4f89363 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 00:11:16 -0500
-Subject: [PATCH 10/16] docs: the firmware must be built on esp-hosted NG's
+Subject: [PATCH 10/18] docs: the firmware must be built on esp-hosted NG's
  patched Wi-Fi libraries
 
 Stock ESP-IDF 5.5.1 lacks the beacon head/tail APPIE slots and

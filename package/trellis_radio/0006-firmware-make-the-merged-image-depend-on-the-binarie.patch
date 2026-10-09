@@ -1,7 +1,7 @@
 From 426774bdc9ec2360d642db3283d87a272c833edb Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 22:58:07 -0500
-Subject: [PATCH 06/16] firmware: make the merged image depend on the binaries
+Subject: [PATCH 06/18] firmware: make the merged image depend on the binaries
  it merges
 
 With only target-level DEPENDS, ninja did not re-run merge_bin after

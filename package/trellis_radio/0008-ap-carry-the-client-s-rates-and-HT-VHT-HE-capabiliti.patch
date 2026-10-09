@@ -1,7 +1,7 @@
 From 3e9f22bd840b307a3c2ed6de48a235b1069f55b8 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 23:09:23 -0500
-Subject: [PATCH 08/16] ap: carry the client's rates and HT/VHT/HE capabilities
+Subject: [PATCH 08/18] ap: carry the client's rates and HT/VHT/HE capabilities
  in AP_ADD_STATION
 
 ieee80211_add_node() was called with no rate or capability IEs, so every

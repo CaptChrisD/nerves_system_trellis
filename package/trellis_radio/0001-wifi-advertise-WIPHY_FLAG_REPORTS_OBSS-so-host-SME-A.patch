@@ -1,7 +1,7 @@
 From 6563dadbbdcd03990974ceb5b2ae7de990214763 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 19:16:56 -0500
-Subject: [PATCH 01/16] wifi: advertise WIPHY_FLAG_REPORTS_OBSS so host-SME AP
+Subject: [PATCH 01/18] wifi: advertise WIPHY_FLAG_REPORTS_OBSS so host-SME AP
  can start
 
 The wiphy runs the AP in host-SME mode (no WIPHY_FLAG_HAVE_AP_SME). In that

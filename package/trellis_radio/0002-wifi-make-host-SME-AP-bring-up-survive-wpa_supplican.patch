@@ -1,7 +1,7 @@
 From f3aeee31b6455c8558014f217bf95046edeef5c1 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 19:16:56 -0500
-Subject: [PATCH 02/16] wifi: make host-SME AP bring-up survive
+Subject: [PATCH 02/18] wifi: make host-SME AP bring-up survive
  wpa_supplicant's startup sequence
 
 Two startup problems seen with wpa_supplicant 2.12 driving wlan1 as an AP

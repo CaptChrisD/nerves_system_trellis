@@ -1,0 +1,110 @@
+From bd6faa66e6c4dc5f33c5e286fc5a8968af9dd0cd Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 12:09:53 -0500
+Subject: [PATCH 17/18] firmware: allow a STA scan while the SoftAP is up
+ (AP+STA for the scan)
+
+The single-role policy made STA_SCAN return EBUSY whenever the AP role was
+active, so a Linux setup UI running in AP mode could never list networks to
+join (hardware-observed 2026-10-09). esp_wifi scans on the STA interface
+with the SoftAP still serving when the chip is in APSTA mode (esp-hosted
+runs its SoftAP in APSTA permanently); switch to APSTA for the scan without
+claiming the STA role and return to the roles' mode on SCAN_DONE.
+---
+ firmware/main/trellis_wifi_sta.c | 50 +++++++++++++++++++++++++-------
+ 1 file changed, 39 insertions(+), 11 deletions(-)
+
+diff --git a/firmware/main/trellis_wifi_sta.c b/firmware/main/trellis_wifi_sta.c
+index 4318608..f285a88 100644
+--- a/firmware/main/trellis_wifi_sta.c
++++ b/firmware/main/trellis_wifi_sta.c
+@@ -33,6 +33,9 @@
+ 
+ static const char *TAG = "trellis_wifi_sta";
+ 
++/* A STA scan issued while the SoftAP is up (see trellis_wifi_sta_scan()). */
++static bool s_scan_from_ap;
++
+ /* Key material's on-wire encoding depends on security_type: WPA2 is always 64
+  * hex-encoded raw-PMK chars (cfg80211 4-way-handshake offload; ESP-IDF's
+  * wpa_set_passphrase() special-cases strlen()==64), WPA3 is a plain ASCII SAE
+@@ -121,6 +124,11 @@ static void trellis_wifi_sta_event_handler(void *arg, esp_event_base_t base, int
+         /* Results already streamed as STA_SCAN_FRAME events during the scan;
+          * stop forwarding beacons/probe-responses now that it's finished. */
+         trellis_wifi_host_scan_frames(false);
++        if (s_scan_from_ap) {
++            /* Back to the AP-only mode the active roles describe. */
++            s_scan_from_ap = false;
++            trellis_wifi_apply_mode();
++        }
+         trellis_wifi_sta_send_event(TRELLIS_EVENT_STA_SCAN_DONE, NULL, 0);
+         ESP_LOGI(TAG, "scan done");
+         break;
+@@ -331,24 +339,40 @@ uint8_t trellis_wifi_sta_disconnect(void)
+     return TRELLIS_CTRL_ERR_OK;
+ }
+ 
++/* A scan requested while the SoftAP is up runs the chip in AP+STA for its
++ * duration (esp_wifi scans on the STA interface while the AP keeps serving;
++ * esp-hosted runs its SoftAP in APSTA mode permanently). The AP-only mode is
++ * restored on SCAN_DONE. Without this a Linux setup UI in AP mode could never
++ * list networks to join: STA_SCAN returned EBUSY (hardware-observed
++ * 2026-10-09). The STA role is not claimed for such a scan. */
+ uint8_t trellis_wifi_sta_scan(void)
+ {
+     /* Scan requires STA/APSTA mode; claim as STA and stay claimed on success.
+      * `already_owner` ensures a failure only releases a claim this call took. */
+     bool already_owner = trellis_wifi_has_role(TRELLIS_WIFI_ROLE_STA);
++    bool from_ap = !already_owner && trellis_wifi_has_role(TRELLIS_WIFI_ROLE_AP);
+     esp_err_t err;
+ 
+-    if (!trellis_wifi_try_claim(TRELLIS_WIFI_ROLE_STA)) {
+-        ESP_LOGW(TAG, "STA scan unavailable (monitor capture active)");
+-        return TRELLIS_CTRL_ERR_EBUSY;
+-    }
++    if (from_ap) {
++        err = esp_wifi_set_mode(WIFI_MODE_APSTA);
++        if (err != ESP_OK) {
++            ESP_LOGW(TAG, "esp_wifi_set_mode(APSTA) for scan failed: %d", err);
++            return TRELLIS_CTRL_ERR_ERADIO;
++        }
++        s_scan_from_ap = true;
++    } else {
++        if (!trellis_wifi_try_claim(TRELLIS_WIFI_ROLE_STA)) {
++            ESP_LOGW(TAG, "STA scan unavailable (monitor capture active)");
++            return TRELLIS_CTRL_ERR_EBUSY;
++        }
+ 
+-    err = trellis_wifi_apply_mode();
+-    if (err != ESP_OK) {
+-        ESP_LOGW(TAG, "trellis_wifi_apply_mode failed: %d", err);
+-        if (!already_owner)
+-            trellis_wifi_release(TRELLIS_WIFI_ROLE_STA);
+-        return TRELLIS_CTRL_ERR_ERADIO;
++        err = trellis_wifi_apply_mode();
++        if (err != ESP_OK) {
++            ESP_LOGW(TAG, "trellis_wifi_apply_mode failed: %d", err);
++            if (!already_owner)
++                trellis_wifi_release(TRELLIS_WIFI_ROLE_STA);
++            return TRELLIS_CTRL_ERR_ERADIO;
++        }
+     }
+ 
+     /* Forward beacons/probe-responses as SCAN_FRAME events for this scan. */
+@@ -359,8 +383,12 @@ uint8_t trellis_wifi_sta_scan(void)
+     if (err != ESP_OK) {
+         ESP_LOGW(TAG, "esp_wifi_scan_start failed: %d", err);
+         trellis_wifi_host_scan_frames(false);
+-        if (!already_owner)
++        if (from_ap) {
++            s_scan_from_ap = false;
++            trellis_wifi_apply_mode();
++        } else if (!already_owner) {
+             trellis_wifi_release(TRELLIS_WIFI_ROLE_STA);
++        }
+         return TRELLIS_CTRL_ERR_ERADIO;
+     }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

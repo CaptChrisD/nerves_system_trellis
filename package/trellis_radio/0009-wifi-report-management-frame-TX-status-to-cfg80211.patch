@@ -1,7 +1,7 @@
 From 1f2973c41ce263d1758154b33741bbe027e38521 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 00:10:38 -0500
-Subject: [PATCH 09/16] wifi: report management-frame TX status to cfg80211
+Subject: [PATCH 09/18] wifi: report management-frame TX status to cfg80211
 
 hostapd (and wpa_supplicant's AP mode) treat a management frame as sent only
 when nl80211 delivers its TX status: ieee802_11_mgmt_cb() -> handle_assoc_cb()

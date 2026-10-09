@@ -1,7 +1,7 @@
 From 0673d690f6917917e97b3f4c673c86e36ff53666 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 09:30:31 -0500
-Subject: [PATCH 13/16] wifi: tunable CONTROL pacing (default 20 ms); only
+Subject: [PATCH 13/18] wifi: tunable CONTROL pacing (default 20 ms); only
  forward AUTHORIZED station changes
 
 The 500 ms floor between CONTROL transactions made host-SME admission far

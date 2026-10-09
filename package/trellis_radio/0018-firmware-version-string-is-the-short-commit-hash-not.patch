@@ -1,0 +1,45 @@
+From 00815072185dd175a0b3712ad32283ec61262dbb Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 12:12:17 -0500
+Subject: [PATCH 18/18] firmware: version string is the short commit hash, not
+ git describe
+
+The driver's fw_version/fw_file_version comparison relies on this string;
+IDF's default git describe --tags output changes shape once a tag exists
+and is truncated to 32 bytes.
+---
+ firmware/CMakeLists.txt | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/firmware/CMakeLists.txt b/firmware/CMakeLists.txt
+index 6476c18..4bee397 100644
+--- a/firmware/CMakeLists.txt
++++ b/firmware/CMakeLists.txt
+@@ -7,6 +7,24 @@ cmake_minimum_required(VERSION 3.22)
+ set(EXCLUDE_COMPONENTS wpa_supplicant)
+ 
+ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
++# Firmware version = short commit hash (+ "-dirty"), never `git describe`:
++# the Linux driver compares this string with the one in trellis_radio_fw.bin
++# to decide whether to reflash, and IDF's default `git describe --tags`
++# output changes shape (and gets truncated at 32 bytes) as soon as a tag
++# exists on the branch.
++execute_process(COMMAND git rev-parse --short HEAD
++    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
++    OUTPUT_VARIABLE trellis_git_rev OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
++execute_process(COMMAND git diff --quiet HEAD --
++    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
++    RESULT_VARIABLE trellis_git_dirty ERROR_QUIET)
++if(trellis_git_rev)
++    set(PROJECT_VER "${trellis_git_rev}")
++    if(trellis_git_dirty)
++        set(PROJECT_VER "${PROJECT_VER}-dirty")
++    endif()
++endif()
++
+ project(trellis_radio)
+ 
+ # Emits build/<preset>/trellis_radio_fw.bin, the image request_firmware() loads.
+-- 
+2.50.1 (Apple Git-155)
+

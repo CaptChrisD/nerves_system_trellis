@@ -1,7 +1,7 @@
 From 143bebeac615f9d2fcc44b711d677cfb52c8e4c4 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 11:41:46 -0500
-Subject: [PATCH 16/16] firmware: demote SoftAP admission diagnostics to debug
+Subject: [PATCH 16/18] firmware: demote SoftAP admission diagnostics to debug
  level; README: state the esp-hosted library dependency precisely
 
 The firmware never linked against stock ESP-IDF (ieee80211_add_node and

@@ -1,7 +1,7 @@
 From c2103872599e6f825342ab491480a2d9d3f24d2b Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 09:31:15 -0500
-Subject: [PATCH 15/16] firmware: build.sh always regenerates the merged image
+Subject: [PATCH 15/18] firmware: build.sh always regenerates the merged image
  after a build
 
 ninja still skips the merge_bin custom command after the app relinks in

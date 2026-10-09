@@ -1,7 +1,7 @@
 From 4ee97366432606e716ab4a01c28081f42b801684 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 09:30:31 -0500
-Subject: [PATCH 14/16] firmware: deauth of an unknown station is a no-op;
+Subject: [PATCH 14/18] firmware: deauth of an unknown station is a no-op;
  ignore AID-0 station adds
 
 hostapd deauthenticates stations it never finished admitting (its routine

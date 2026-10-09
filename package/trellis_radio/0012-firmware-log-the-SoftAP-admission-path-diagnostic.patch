@@ -1,7 +1,7 @@
 From 3b66596f9c52044680286a280b41078d876df4b4 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 09:26:47 -0500
-Subject: [PATCH 12/16] firmware: log the SoftAP admission path (diagnostic)
+Subject: [PATCH 12/18] firmware: log the SoftAP admission path (diagnostic)
 
 ---
  firmware/main/trellis_wifi_ap.c   | 2 ++

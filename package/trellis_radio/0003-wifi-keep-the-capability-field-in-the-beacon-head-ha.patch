@@ -1,7 +1,7 @@
 From 8c7a8d00ef46018697548e67982cde4d34307f93 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 22:03:38 -0500
-Subject: [PATCH 03/16] wifi: keep the capability field in the beacon head
+Subject: [PATCH 03/18] wifi: keep the capability field in the beacon head
  handed to the firmware
 
 esp_wifi's WIFI_APPIE_RAM_BEACON_PROBE_HEAD template starts at the beacon's

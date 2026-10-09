@@ -1,7 +1,7 @@
 From 4270dba1d0a49c057084566019e67482c5689abd Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 23:02:37 -0500
-Subject: [PATCH 07/16] firmware: send SoftAP management frames via
+Subject: [PATCH 07/18] firmware: send SoftAP management frames via
  ieee80211_send_mgmt_internal
 
 Routing the host authenticator's auth/assoc responses through

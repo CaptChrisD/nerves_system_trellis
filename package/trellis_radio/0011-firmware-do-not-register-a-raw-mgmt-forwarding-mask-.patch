@@ -1,7 +1,7 @@
 From b593a3e6365d02a88375b777c86979ea11e3a7b7 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Fri, 9 Oct 2026 09:22:39 -0500
-Subject: [PATCH 11/16] firmware: do not register a raw mgmt forwarding mask
+Subject: [PATCH 11/18] firmware: do not register a raw mgmt forwarding mask
  for the SoftAP
 
 esp-hosted NG feeds hostapd's auth/assoc/action frames through the

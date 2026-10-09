@@ -1,7 +1,7 @@
 From d6c52953a44d5686907cc54a6c18592bd5685f51 Mon Sep 17 00:00:00 2001
 From: Chris Dutton <chris@bigcove.io>
 Date: Thu, 8 Oct 2026 22:36:19 -0500
-Subject: [PATCH 04/16] wifi: ap_host_ies module parameter to bypass host
+Subject: [PATCH 04/18] wifi: ap_host_ies module parameter to bypass host
  beacon IEs (diagnostic)
 
 ---
