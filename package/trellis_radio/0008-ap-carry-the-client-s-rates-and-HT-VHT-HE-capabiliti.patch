@@ -1,0 +1,209 @@
+From 3e9f22bd840b307a3c2ed6de48a235b1069f55b8 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 23:09:23 -0500
+Subject: [PATCH 08/16] ap: carry the client's rates and HT/VHT/HE capabilities
+ in AP_ADD_STATION
+
+ieee80211_add_node() was called with no rate or capability IEs, so every
+admitted client became an 11b node with no usable TX rate: the association
+response hostapd sends right after add_station never made it on air and the
+client re-associated until it gave up (hardware-observed 2026-10-09, Mac
+client, "phymode 11b, max_rate:0" in the firmware trace). esp-hosted NG's
+cmd_add_station/add_station_node_ap pass exactly these four IEs.
+
+Extend AP_ADD_STATION from 12 to 93 bytes: supported-rates, HT, VHT and HE
+capability IEs as the host received them, zero when absent. The firmware
+decoder still accepts the legacy 12-byte form.
+---
+ common/trellis_ap.h               | 54 ++++++++++++++++++++++++++++---
+ driver/trellis_wifi_ap.c          | 35 ++++++++++++++++++++
+ firmware/main/trellis_wifi_host.c | 14 ++++++--
+ 3 files changed, 96 insertions(+), 7 deletions(-)
+
+diff --git a/common/trellis_ap.h b/common/trellis_ap.h
+index f690309..0e3a1ab 100644
+--- a/common/trellis_ap.h
++++ b/common/trellis_ap.h
+@@ -123,23 +123,48 @@ static inline int trellis_ap_set_ie_decode(const uint8_t *args, uint16_t arglen,
+ 
+ /* ---- AP_ADD_STATION (Phase C host-SME): register/authorize one client the
+  * host authenticator admitted. mac[6] + aid(2 LE) + flags(4 LE). ---- */
+-#define TRELLIS_AP_ADD_STATION_ARGS_LEN 12u
++/* Wire layout (all little-endian, fixed size):
++ *   mac[6] aid[2] flags[4]                         - 12 bytes (legacy form)
++ *   rates_ie[12] ht_ie[28] vht_ie[14] he_ie[27]    - 81 bytes, each an 802.11
++ *     IE (id, len, data) exactly as esp-hosted NG's cmd_ap_add_sta_config
++ *     carries them, or all-zero when the host has none for that client.
++ * The decoder accepts both the legacy 12-byte and the full 93-byte form. */
++#define TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN 12u
++#define TRELLIS_AP_STA_RATES_IE_LEN 12u
++#define TRELLIS_AP_STA_HT_IE_LEN 28u
++#define TRELLIS_AP_STA_VHT_IE_LEN 14u
++#define TRELLIS_AP_STA_HE_IE_LEN 27u
++#define TRELLIS_AP_ADD_STATION_ARGS_LEN                                        \
++  (TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN + TRELLIS_AP_STA_RATES_IE_LEN +      \
++   TRELLIS_AP_STA_HT_IE_LEN + TRELLIS_AP_STA_VHT_IE_LEN +                      \
++   TRELLIS_AP_STA_HE_IE_LEN)
+ 
+ /* nl80211 STA flag bit indicating the port is authorized (matches the host's
+  * NL80211_STA_FLAG_AUTHORIZED bit position). */
+ #define TRELLIS_AP_STA_FLAG_AUTHORIZED (1u << 1)
+ 
+-/* Host-order (decoded) representation of AP_ADD_STATION's args. */
++/* Host-order (decoded) representation of AP_ADD_STATION's args. The IE
++ * buffers are present when their first byte (the element id) is non-zero:
++ * the firmware hands them to ieee80211_add_node() so the node gets the
++ * client's real rate set and HT/VHT/HE capabilities. Without them the node
++ * is an 11b legacy station with no usable TX rate, and unicast management
++ * frames to it (the association response) never make it on air. */
+ struct trellis_ap_add_station {
+   uint8_t mac[6];
+   uint16_t aid;
+   uint32_t flags;
++  uint8_t rates_ie[TRELLIS_AP_STA_RATES_IE_LEN];
++  uint8_t ht_ie[TRELLIS_AP_STA_HT_IE_LEN];
++  uint8_t vht_ie[TRELLIS_AP_STA_VHT_IE_LEN];
++  uint8_t he_ie[TRELLIS_AP_STA_HE_IE_LEN];
+ };
+ 
+ /* Encode AP_ADD_STATION's args; bytes written or <0. */
+ static inline int
+ trellis_ap_add_station_encode(uint8_t *buf, size_t buflen,
+                               const struct trellis_ap_add_station *s) {
++  size_t off = TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN;
++
+   if (buflen < TRELLIS_AP_ADD_STATION_ARGS_LEN)
+     return -1;
+ 
+@@ -150,21 +175,42 @@ trellis_ap_add_station_encode(uint8_t *buf, size_t buflen,
+   buf[9] = (uint8_t)((s->flags >> 8) & 0xffu);
+   buf[10] = (uint8_t)((s->flags >> 16) & 0xffu);
+   buf[11] = (uint8_t)((s->flags >> 24) & 0xffu);
++  memcpy(&buf[off], s->rates_ie, TRELLIS_AP_STA_RATES_IE_LEN);
++  off += TRELLIS_AP_STA_RATES_IE_LEN;
++  memcpy(&buf[off], s->ht_ie, TRELLIS_AP_STA_HT_IE_LEN);
++  off += TRELLIS_AP_STA_HT_IE_LEN;
++  memcpy(&buf[off], s->vht_ie, TRELLIS_AP_STA_VHT_IE_LEN);
++  off += TRELLIS_AP_STA_VHT_IE_LEN;
++  memcpy(&buf[off], s->he_ie, TRELLIS_AP_STA_HE_IE_LEN);
+ 
+   return (int)TRELLIS_AP_ADD_STATION_ARGS_LEN;
+ }
+ 
+-/* Decode AP_ADD_STATION's args. 0 / -1. */
++/* Decode AP_ADD_STATION's args (legacy or full form). 0 / -1. */
+ static inline int
+ trellis_ap_add_station_decode(const uint8_t *args, uint16_t arglen,
+                               struct trellis_ap_add_station *out) {
+-  if (arglen != TRELLIS_AP_ADD_STATION_ARGS_LEN)
++  size_t off = TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN;
++
++  if (arglen != TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN &&
++      arglen != TRELLIS_AP_ADD_STATION_ARGS_LEN)
+     return -1;
+ 
++  memset(out, 0, sizeof(*out));
+   memcpy(out->mac, &args[0], 6);
+   out->aid = (uint16_t)args[6] | ((uint16_t)args[7] << 8);
+   out->flags = (uint32_t)args[8] | ((uint32_t)args[9] << 8) |
+                ((uint32_t)args[10] << 16) | ((uint32_t)args[11] << 24);
++  if (arglen == TRELLIS_AP_ADD_STATION_LEGACY_ARGS_LEN)
++    return 0;
++
++  memcpy(out->rates_ie, &args[off], TRELLIS_AP_STA_RATES_IE_LEN);
++  off += TRELLIS_AP_STA_RATES_IE_LEN;
++  memcpy(out->ht_ie, &args[off], TRELLIS_AP_STA_HT_IE_LEN);
++  off += TRELLIS_AP_STA_HT_IE_LEN;
++  memcpy(out->vht_ie, &args[off], TRELLIS_AP_STA_VHT_IE_LEN);
++  off += TRELLIS_AP_STA_VHT_IE_LEN;
++  memcpy(out->he_ie, &args[off], TRELLIS_AP_STA_HE_IE_LEN);
+ 
+   return 0;
+ }
+diff --git a/driver/trellis_wifi_ap.c b/driver/trellis_wifi_ap.c
+index 4aa10d7..01e83e3 100644
+--- a/driver/trellis_wifi_ap.c
++++ b/driver/trellis_wifi_ap.c
+@@ -7,6 +7,7 @@
+ #include "trellis_wifi_ap.h"
+ 
+ #include <linux/etherdevice.h>
++#include <linux/minmax.h>
+ #include <linux/moduleparam.h>
+ #include <linux/ieee80211.h>
+ #include <linux/netdevice.h>
+@@ -355,6 +356,8 @@ static int trellis_wifi_ap_add_station(struct trellis_wifi_ap *ap,
+ 	u8 args[TRELLIS_AP_ADD_STATION_ARGS_LEN];
+ 	int arglen;
+ 
++	const struct link_station_parameters *lp = &params->link_sta_params;
++
+ 	memcpy(s.mac, mac, ETH_ALEN);
+ 	s.aid = params->aid;
+ 	/* Forward only the authorized bit the firmware acts on; its wire flag
+@@ -362,6 +365,38 @@ static int trellis_wifi_ap_add_station(struct trellis_wifi_ap *ap,
+ 	if (params->sta_flags_set & BIT(NL80211_STA_FLAG_AUTHORIZED))
+ 		s.flags |= TRELLIS_AP_STA_FLAG_AUTHORIZED;
+ 
++	/* The client's rate set and HT/VHT/HE capabilities, as 802.11 IEs the
++	 * firmware feeds to ieee80211_add_node() (esp-hosted NG cmd_add_station
++	 * builds the same four). Without them the node is an 11b station with
++	 * no usable TX rate and the association response never goes out. */
++	if (lp->supported_rates && lp->supported_rates_len) {
++		u8 n = min_t(u8, lp->supported_rates_len,
++			     TRELLIS_AP_STA_RATES_IE_LEN - 2);
++
++		s.rates_ie[0] = WLAN_EID_SUPP_RATES;
++		s.rates_ie[1] = n;
++		memcpy(&s.rates_ie[2], lp->supported_rates, n);
++	}
++	if (lp->ht_capa) {
++		s.ht_ie[0] = WLAN_EID_HT_CAPABILITY;
++		s.ht_ie[1] = sizeof(struct ieee80211_ht_cap);
++		memcpy(&s.ht_ie[2], lp->ht_capa, sizeof(struct ieee80211_ht_cap));
++	}
++	if (lp->vht_capa) {
++		s.vht_ie[0] = WLAN_EID_VHT_CAPABILITY;
++		s.vht_ie[1] = sizeof(struct ieee80211_vht_cap);
++		memcpy(&s.vht_ie[2], lp->vht_capa,
++		       sizeof(struct ieee80211_vht_cap));
++	}
++	if (lp->he_capa && lp->he_capa_len) {
++		u8 n = min_t(u8, lp->he_capa_len, TRELLIS_AP_STA_HE_IE_LEN - 3);
++
++		s.he_ie[0] = WLAN_EID_EXTENSION;
++		s.he_ie[1] = n + 1;
++		s.he_ie[2] = WLAN_EID_EXT_HE_CAPABILITY;
++		memcpy(&s.he_ie[3], lp->he_capa, n);
++	}
++
+ 	arglen = trellis_ap_add_station_encode(args, sizeof(args), &s);
+ 	if (arglen < 0)
+ 		return -EINVAL;
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index fdc09fa..ffad73e 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -692,8 +692,16 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+         return TRELLIS_CTRL_ERR_OK;
+     }
+ 
+-    /* Bare add: create the node with no negotiated rate/cap IEs (the host's
+-     * assoc handling already primed esp_wifi's per-station state). */
+-    ret = ieee80211_add_node(WIFI_IF_AP, s.mac, s.aid, NULL, NULL, NULL, NULL);
++    /* Create the node with the client's rate set and HT/VHT/HE capability
++     * IEs the host authenticator parsed from its association request (same
++     * four esp-hosted NG's add_station_node_ap passes). A node created with
++     * none of them is an 11b station with no TX rate: the association
++     * response is never transmitted and the client loops on assoc
++     * (hardware-observed 2026-10-09). A legacy 12-byte request has none. */
++    ret = ieee80211_add_node(WIFI_IF_AP, s.mac, s.aid, s.rates_ie[0] ? s.rates_ie : NULL,
++                             s.ht_ie[0] ? s.ht_ie : NULL, s.vht_ie[0] ? s.vht_ie : NULL,
++                             s.he_ie[0] ? s.he_ie : NULL);
++    if (ret != 0)
++        ESP_LOGW(TAG, "ieee80211_add_node failed: %d", ret);
+     return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
+ }
+-- 
+2.50.1 (Apple Git-155)
+

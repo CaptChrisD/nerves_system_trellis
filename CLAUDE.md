@@ -64,8 +64,8 @@ default is `mm-fseries`. Rollback uses U-Boot's `upgrade_available`/`bootcount`/
 
 - **Console:** UART4 on PD7/PD8 at 115200 baud
 - **Storage:** MMC0 (on-board flash, 4-bit); `mmc0`/`mmc1` aliases are pinned so MMC1 is always the WiFi
-- **Networking:** 100M Ethernet (DWMAC/RMII + DP83825I PHY, MAC from SoC SID); ESP32-C6 WiFi over SDIO on MMC1 via the `esp-hosted` Buildroot package (`package/esp-hosted`, `patches/esp-hosted`)
-- **Buses:** I2C2 (PD20/PD21), CAN0, UART1 (ESP control), UART2 (STM32 coprocessor), UART3 (Bluetooth), SPI1 disabled
+- **Networking:** 100M Ethernet (DWMAC/RMII + DP83825I PHY, MAC from SoC SID); ESP32-C6 radio over SDIO on MMC1 via the `trellis_radio` kernel module (`package/trellis_radio`, built from https://pushin.eu/gus/trellis-radio). It exposes `wlan0` (STA), `wlan1` (AP), `hci0` (BLE) and `wpan0` (802.15.4). STA and AP are mutually exclusive roles in the ESP firmware. The driver owns `ESP_RESET` (PG11, `mmc-pwrseq-simple`) and `ESP_BOOT` (PG10, `boot-gpios`) and reflashes the ESP32 over SDIO from `/lib/firmware/trellis_radio_fw.bin` when versions differ (`fw_autoupdate=1`). Sysfs: `/sys/bus/sdio/drivers/trellis_radio/mmc1:*/{fw_state,fw_version,fw_file_version,fw_flash,esp32_boot_mode}`. Package patches live in `package/trellis_radio/*.patch`, generated with `git format-patch f6f3582..HEAD` from our fork at `../trellis-radio` (branch `mm-ap-mode`); Buildroot applies them from the package dir and `BR2_GLOBAL_PATCH_DIR` stays upstream's. After changing a patch, delete the package's build dir inside the Docker volume and the `~/.nerves/artifacts/...` dir, or the rebuild is skipped. The ESP32-C6 blob in `rootfs_overlay/lib/firmware/` is built from the same fork (`trellis-radio/firmware`, `./build.sh production build` on the esp-hosted-patched IDF described in the fork's README) and must be refreshed whenever the firmware side of the fork changes; the driver reflashes the chip on boot when the versions differ. The app must run its AP with `ap_scan=2`: the driver rejects scans on the AP interface
+- **Buses:** I2C2 (PD20/PD21), CAN0, UART1 (ESP32 console, unused by the driver), UART2 (STM32 coprocessor), UART3 (wired to the ESP32, unused), SPI1 disabled
 - **USB:** OTG (USB-C for FEL mode), USB host (EHCI/OHCI) with mass storage + VFAT for USB firmware updates
 - **LEDs:** `mm-fseries:*` status (PC7), ethernet (PD9), can (PD6), audio (PB7), trigger1-4 (PD16-PD19)
 - **Identity:** ATECC508A crypto chip on I2C2 for serial numbers
@@ -81,8 +81,8 @@ default is `mm-fseries`. Rollback uses U-Boot's `upgrade_available`/`bootcount`/
 
 - `rootfs_overlay/etc/erlinit.config` — Erlang VM startup (console ttyS4, hostname `nerves-<serial>`, mounts app partition)
 - `rootfs_overlay/etc/boardid.config` — Serial number sources (ATECC508A first, then SoC SID fallback)
-- `rootfs_overlay/etc/modprobe.d/esp-hosted.conf`, `rootfs_overlay/usr/bin/pre-run.sh` — ESP32 SDIO driver options / erlinit pre-run hook
+- `rootfs_overlay/etc/modprobe.d/trellis_radio.conf` (`fw_autoupdate=1`), `rootfs_overlay/usr/bin/pre-run.sh` (modprobes `trellis_radio` before the BEAM), `rootfs_overlay/lib/firmware/trellis_radio_fw.bin` (merged ESP32-C6 image copied from the developer's `nerves_system_trellis_radio` branch; the flasher stub comes from the package build)
 
 ## Merging from upstream
 
-`git fetch upstream --tags && git merge vX.Y.Z`. Keep: `@app`/`@github_organization` in `mix.exs`, `NERVES_FW_PRODUCT`/`NERVES_FW_AUTHOR` in `fwup.conf`, `fit_config=mm-fseries` in `uboot.env`, the `mm-fseries` entries in `trellis.its`, our U-Boot DTS pins/LED, and everything in `package/`, `patches/`, `external.mk`. Let upstream's own DTS files take upstream's content. Bump `VERSION` to `<upstream>-mm.N`.
+`git fetch upstream --tags && git merge vX.Y.Z`. Keep: `@app`/`@github_organization` in `mix.exs`, `NERVES_FW_PRODUCT`/`NERVES_FW_AUTHOR` in `fwup.conf`, `fit_config=mm-fseries` in `uboot.env`, the `mm-fseries` entries in `trellis.its`, our U-Boot DTS pins/LED, and everything in `package/`, `external.mk`, `Config.in`, `rootfs_overlay/lib/firmware/`. Let upstream's own DTS files take upstream's content. Bump `VERSION` to `<upstream>-mm.N`.

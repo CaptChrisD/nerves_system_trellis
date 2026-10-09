@@ -1,0 +1,82 @@
+From d6c52953a44d5686907cc54a6c18592bd5685f51 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 22:36:19 -0500
+Subject: [PATCH 04/16] wifi: ap_host_ies module parameter to bypass host
+ beacon IEs (diagnostic)
+
+---
+ .gitignore               |  7 +++++++
+ driver/trellis_wifi_ap.c | 21 ++++++++++++++++++---
+ 2 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/.gitignore b/.gitignore
+index fe40589..2f9b94c 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -34,3 +34,10 @@ common/tests/fuzz_ap
+ common/tests/fuzz_appdesc
+ common/tests/fuzz_ieee802154
+ common/tests/test_credit
++
++# Host-side test build artifacts (scripts/run-tests.sh tier0)
++common/tests/*.dSYM/
++common/tests/fuzz_*
++common/tests/test_*
++!common/tests/*.c
++!common/tests/*.h
+diff --git a/driver/trellis_wifi_ap.c b/driver/trellis_wifi_ap.c
+index ec94996..4aa10d7 100644
+--- a/driver/trellis_wifi_ap.c
++++ b/driver/trellis_wifi_ap.c
+@@ -7,6 +7,7 @@
+ #include "trellis_wifi_ap.h"
+ 
+ #include <linux/etherdevice.h>
++#include <linux/moduleparam.h>
+ #include <linux/ieee80211.h>
+ #include <linux/netdevice.h>
+ #include <linux/skbuff.h>
+@@ -23,6 +24,16 @@
+ 
+ #define TRELLIS_WIFI_AP_CTRL_TIMEOUT_MS 1000
+ 
++/* Diagnostic switch: push hostapd's beacon head/tail + probe/assoc-resp IEs
++ * into the firmware's APPIE slots before AP_START (default), or leave the
++ * firmware to beacon from its own wifi_config alone. Lets a bench unit
++ * answer "does the firmware beacon at all without host IEs?" without a
++ * rebuild: modprobe trellis_radio ap_host_ies=0. */
++static bool ap_host_ies = true;
++module_param(ap_host_ies, bool, 0644);
++MODULE_PARM_DESC(ap_host_ies,
++		 "push hostapd beacon/probe/assoc IEs to firmware (default Y)");
++
+ /* Bytes stripped from the front of cfg80211's beacon head before it goes to
+  * esp_wifi's WIFI_APPIE_RAM_BEACON_PROBE_HEAD slot: the 24-byte 802.11 header
+  * plus the 8-byte timestamp and 2-byte beacon interval. The 2-byte capability
+@@ -273,9 +284,11 @@ int trellis_wifi_ap_start_op(struct wiphy *wiphy, struct net_device *dev,
+ 
+ 	/* Push the beacon/probe/assoc-resp IEs before AP_START so the firmware's
+ 	 * beacon carries hostapd's real RSN/crypto IEs from the first beacon. */
+-	ret = trellis_wifi_ap_set_beacon_ies(ap, &settings->beacon);
+-	if (ret)
+-		return ret;
++	if (ap_host_ies) {
++		ret = trellis_wifi_ap_set_beacon_ies(ap, &settings->beacon);
++		if (ret)
++			return ret;
++	}
+ 
+ 	ret = trellis_ctrl_request(ap->ctrl, TRELLIS_CTRL_AP_START, args,
+ 				   (u16)arglen, &status,
+@@ -325,6 +338,8 @@ int trellis_wifi_ap_change_beacon_op(struct wiphy *wiphy,
+ {
+ 	struct trellis_wifi_ap_priv *priv = netdev_priv(dev);
+ 
++	if (!ap_host_ies)
++		return 0;
+ 	return trellis_wifi_ap_set_beacon_ies(priv->ap, &info->beacon);
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,117 @@
+From 143bebeac615f9d2fcc44b711d677cfb52c8e4c4 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 11:41:46 -0500
+Subject: [PATCH 16/16] firmware: demote SoftAP admission diagnostics to debug
+ level; README: state the esp-hosted library dependency precisely
+
+The firmware never linked against stock ESP-IDF (ieee80211_add_node and
+esp_wifi_send_assoc_internal only exist in esp-hosted NG's build of the
+Wi-Fi libraries), so describe it as the build requirement it is rather than
+as a behavioural difference.
+---
+ README.md                         | 18 +++++++++---------
+ firmware/main/trellis_wifi_ap.c   |  2 +-
+ firmware/main/trellis_wifi_host.c | 10 +++++-----
+ 3 files changed, 15 insertions(+), 15 deletions(-)
+
+diff --git a/README.md b/README.md
+index 2056442..4e3534e 100644
+--- a/README.md
++++ b/README.md
+@@ -44,12 +44,12 @@ everything above the driver - no bespoke radio API to integrate against.
+ ### Firmware toolchain: ESP-IDF v5.5.1 with esp-hosted NG's Wi-Fi libraries
+ 
+ The host-SME WiFi model (hostapd/wpa_supplicant on Linux run the AP
+-authenticator and the STA SME) depends on hooks that only exist in the
+-Wi-Fi libraries Espressif ships with **esp-hosted NG**, not in stock ESP-IDF:
+-the `WIFI_APPIE_RAM_BEACON_PROBE_HEAD/TAIL` beacon slots and
+-`ieee80211_send_mgmt_internal()` among them. A firmware built on stock IDF
+-links fine but the SoftAP never beacons and clients can never associate
+-(verified on hardware, 2026-10-09). Set the toolchain up exactly as
++authenticator and the STA SME) uses entry points that only exist in the
++build of Espressif's closed Wi-Fi libraries shipped with **esp-hosted NG**:
++`ieee80211_add_node()`, `ieee80211_send_mgmt_internal()`,
++`esp_wifi_send_assoc_internal()`, the beacon head/tail IE slots and others
++(17 symbols absent from stock ESP-IDF 5.5.1's `libnet80211.a`). The firmware
++does not link against stock IDF at all. Set the toolchain up exactly as
+ esp-hosted does, on the same IDF commit:
+ 
+ ```sh
+@@ -64,9 +64,9 @@ rm -rf components/esp_wifi/lib/* && cp -r <esp-hosted>/esp_hosted_ng/esp/esp_dri
+ 
+ (`<esp-hosted>` is a checkout of https://github.com/espressif/esp-hosted at
+ `release/ng-1.0.6`; its `esp_hosted_ng/esp/esp_driver/.env` pins the IDF
+-commit above.) A correctly built image contains the patched library's
+-version string `d34ae1d`; stock IDF 5.5.1 reports `bad379d` on the ESP32's
+-console at boot (`wifi firmware version:`).
++commit above.) The ESP32 prints the library revision at boot
++(`wifi firmware version:`); 1.0.6's `libnet80211` is `d34ae1d`, stock IDF
++5.5.1's is `14da9b7`.
+ 
+ Build with the preset wrapper (`idf.py --preset` is an IDF 6 feature):
+ 
+diff --git a/firmware/main/trellis_wifi_ap.c b/firmware/main/trellis_wifi_ap.c
+index 994d00e..417529a 100644
+--- a/firmware/main/trellis_wifi_ap.c
++++ b/firmware/main/trellis_wifi_ap.c
+@@ -419,7 +419,7 @@ void trellis_wifi_ap_data_rx(uint16_t flags, const uint8_t *chunk, uint16_t chun
+ 
+     err = esp_wifi_internal_tx(WIFI_IF_AP, s_ap_data_reasm.buf, frame_len);
+     if (frame_len >= 14 && s_ap_data_reasm.buf[12] == 0x88 && s_ap_data_reasm.buf[13] == 0x8e)
+-        ESP_LOGI(TAG, "ap tx EAPOL %u bytes -> %d", frame_len, err);
++        ESP_LOGD(TAG, "ap tx EAPOL %u bytes -> %d", frame_len, err);
+     if (err != 0)
+         ESP_LOGW(TAG, "esp_wifi_internal_tx failed: %d (%u bytes)", err, frame_len);
+ 
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index 1fe6eca..dfb4337 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -238,7 +238,7 @@ static int host_ap_deinit(void *data)
+ static int host_ap_join(uint8_t *bssid, uint8_t *wpa_ie, uint8_t wpa_ie_len, uint8_t *rsnxe, uint16_t rsnxe_len,
+                         bool *pmf_enable, int subtype, uint8_t *pairwise_cipher)
+ {
+-    ESP_LOGI(TAG, "ap join cb: %02x:%02x:%02x:%02x:%02x:%02x subtype %d wpa_ie_len %u", bssid[0], bssid[1],
++    ESP_LOGD(TAG, "ap join cb: %02x:%02x:%02x:%02x:%02x:%02x subtype %d wpa_ie_len %u", bssid[0], bssid[1],
+              bssid[2], bssid[3], bssid[4], bssid[5], subtype, wpa_ie_len);
+     (void)bssid;
+     (void)wpa_ie;
+@@ -314,7 +314,7 @@ static int host_ap_rx_mgmt(void *pkt, uint32_t pkt_len, uint8_t chan, int rssi,
+     rx.rssi = (int8_t)rssi;
+     memcpy(rx.frame, pkt, frame_len);
+     rx.frame_len = (uint16_t)frame_len;
+-    ESP_LOGI(TAG, "ap rx mgmt: subtype 0x%x len %u from %02x:%02x:%02x:%02x:%02x:%02x",
++    ESP_LOGD(TAG, "ap rx mgmt: subtype 0x%x len %u from %02x:%02x:%02x:%02x:%02x:%02x",
+              (rx.frame[0] >> 4) & 0x0fu, (unsigned)frame_len, rx.frame[10], rx.frame[11], rx.frame[12],
+              rx.frame[13], rx.frame[14], rx.frame[15]);
+ 
+@@ -521,7 +521,7 @@ uint8_t trellis_wifi_host_mgmt_tx(const uint8_t *args, uint16_t arglen)
+         memcmp(&t.frame[10], ap_mac, MAC_ADDR_LEN) == 0) {
+         int ret = ieee80211_send_mgmt_internal(WIFI_IF_AP, t.frame, t.frame_len);
+ 
+-        ESP_LOGI(TAG, "ap mgmt tx: subtype 0x%x len %u ret %d", (t.frame[0] >> 4) & 0x0fu, (unsigned)t.frame_len, ret);
++        ESP_LOGD(TAG, "ap mgmt tx: subtype 0x%x len %u ret %d", (t.frame[0] >> 4) & 0x0fu, (unsigned)t.frame_len, ret);
+         if (ret != 0)
+             ESP_LOGW(TAG, "AP mgmt tx failed: %d (subtype 0x%x)", ret, (t.frame[0] >> 4) & 0x0fu);
+         return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
+@@ -693,7 +693,7 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+     if (trellis_ap_add_station_decode(args, arglen, &s) != 0)
+         return TRELLIS_CTRL_ERR_EINVAL;
+ 
+-    ESP_LOGI(TAG, "ap add station: aid %u flags 0x%lx rates_ie %u ht %u vht %u he %u", s.aid, (unsigned long)s.flags,
++    ESP_LOGD(TAG, "ap add station: aid %u flags 0x%lx rates_ie %u ht %u vht %u he %u", s.aid, (unsigned long)s.flags,
+              s.rates_ie[0], s.ht_ie[0], s.vht_ie[0], s.he_ie[0]);
+     if (s.flags & TRELLIS_AP_STA_FLAG_AUTHORIZED) {
+         esp_wifi_wpa_ptk_init_done_internal(s.mac);
+@@ -713,7 +713,7 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+     ret = ieee80211_add_node(WIFI_IF_AP, s.mac, s.aid, s.rates_ie[0] ? s.rates_ie : NULL,
+                              s.ht_ie[0] ? s.ht_ie : NULL, s.vht_ie[0] ? s.vht_ie : NULL,
+                              s.he_ie[0] ? s.he_ie : NULL);
+-    ESP_LOGI(TAG, "ieee80211_add_node -> %d", ret);
++    ESP_LOGD(TAG, "ieee80211_add_node -> %d", ret);
+     if (ret != 0)
+         ESP_LOGW(TAG, "ieee80211_add_node failed: %d", ret);
+     return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
+-- 
+2.50.1 (Apple Git-155)
+

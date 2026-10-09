@@ -1,0 +1,74 @@
+From 3b66596f9c52044680286a280b41078d876df4b4 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 09:26:47 -0500
+Subject: [PATCH 12/16] firmware: log the SoftAP admission path (diagnostic)
+
+---
+ firmware/main/trellis_wifi_ap.c   | 2 ++
+ firmware/main/trellis_wifi_host.c | 9 +++++++++
+ 2 files changed, 11 insertions(+)
+
+diff --git a/firmware/main/trellis_wifi_ap.c b/firmware/main/trellis_wifi_ap.c
+index e965cb9..9bd232a 100644
+--- a/firmware/main/trellis_wifi_ap.c
++++ b/firmware/main/trellis_wifi_ap.c
+@@ -415,6 +415,8 @@ void trellis_wifi_ap_data_rx(uint16_t flags, const uint8_t *chunk, uint16_t chun
+     }
+ 
+     err = esp_wifi_internal_tx(WIFI_IF_AP, s_ap_data_reasm.buf, frame_len);
++    if (frame_len >= 14 && s_ap_data_reasm.buf[12] == 0x88 && s_ap_data_reasm.buf[13] == 0x8e)
++        ESP_LOGI(TAG, "ap tx EAPOL %u bytes -> %d", frame_len, err);
+     if (err != 0)
+         ESP_LOGW(TAG, "esp_wifi_internal_tx failed: %d (%u bytes)", err, frame_len);
+ 
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index ffad73e..8a0a54d 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -238,6 +238,8 @@ static int host_ap_deinit(void *data)
+ static int host_ap_join(uint8_t *bssid, uint8_t *wpa_ie, uint8_t wpa_ie_len, uint8_t *rsnxe, uint16_t rsnxe_len,
+                         bool *pmf_enable, int subtype, uint8_t *pairwise_cipher)
+ {
++    ESP_LOGI(TAG, "ap join cb: %02x:%02x:%02x:%02x:%02x:%02x subtype %d wpa_ie_len %u", bssid[0], bssid[1],
++             bssid[2], bssid[3], bssid[4], bssid[5], subtype, wpa_ie_len);
+     (void)bssid;
+     (void)wpa_ie;
+     (void)wpa_ie_len;
+@@ -312,6 +314,9 @@ static int host_ap_rx_mgmt(void *pkt, uint32_t pkt_len, uint8_t chan, int rssi,
+     rx.rssi = (int8_t)rssi;
+     memcpy(rx.frame, pkt, frame_len);
+     rx.frame_len = (uint16_t)frame_len;
++    ESP_LOGI(TAG, "ap rx mgmt: subtype 0x%x len %u from %02x:%02x:%02x:%02x:%02x:%02x",
++             (rx.frame[0] >> 4) & 0x0fu, (unsigned)frame_len, rx.frame[10], rx.frame[11], rx.frame[12],
++             rx.frame[13], rx.frame[14], rx.frame[15]);
+ 
+     enc = trellis_mlme_rx_encode(args, sizeof(args), &rx);
+     if (enc < 0)
+@@ -516,6 +521,7 @@ uint8_t trellis_wifi_host_mgmt_tx(const uint8_t *args, uint16_t arglen)
+         memcmp(&t.frame[10], ap_mac, MAC_ADDR_LEN) == 0) {
+         int ret = ieee80211_send_mgmt_internal(WIFI_IF_AP, t.frame, t.frame_len);
+ 
++        ESP_LOGI(TAG, "ap mgmt tx: subtype 0x%x len %u ret %d", (t.frame[0] >> 4) & 0x0fu, (unsigned)t.frame_len, ret);
+         if (ret != 0)
+             ESP_LOGW(TAG, "AP mgmt tx failed: %d (subtype 0x%x)", ret, (t.frame[0] >> 4) & 0x0fu);
+         return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
+@@ -687,6 +693,8 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+     if (trellis_ap_add_station_decode(args, arglen, &s) != 0)
+         return TRELLIS_CTRL_ERR_EINVAL;
+ 
++    ESP_LOGI(TAG, "ap add station: aid %u flags 0x%lx rates_ie %u ht %u vht %u he %u", s.aid, (unsigned long)s.flags,
++             s.rates_ie[0], s.ht_ie[0], s.vht_ie[0], s.he_ie[0]);
+     if (s.flags & TRELLIS_AP_STA_FLAG_AUTHORIZED) {
+         esp_wifi_wpa_ptk_init_done_internal(s.mac);
+         return TRELLIS_CTRL_ERR_OK;
+@@ -701,6 +709,7 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+     ret = ieee80211_add_node(WIFI_IF_AP, s.mac, s.aid, s.rates_ie[0] ? s.rates_ie : NULL,
+                              s.ht_ie[0] ? s.ht_ie : NULL, s.vht_ie[0] ? s.vht_ie : NULL,
+                              s.he_ie[0] ? s.he_ie : NULL);
++    ESP_LOGI(TAG, "ieee80211_add_node -> %d", ret);
+     if (ret != 0)
+         ESP_LOGW(TAG, "ieee80211_add_node failed: %d", ret);
+     return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
+-- 
+2.50.1 (Apple Git-155)
+

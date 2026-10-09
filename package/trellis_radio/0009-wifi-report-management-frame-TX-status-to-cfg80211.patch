@@ -1,0 +1,98 @@
+From 1f2973c41ce263d1758154b33741bbe027e38521 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 00:10:38 -0500
+Subject: [PATCH 09/16] wifi: report management-frame TX status to cfg80211
+
+hostapd (and wpa_supplicant's AP mode) treat a management frame as sent only
+when nl80211 delivers its TX status: ieee802_11_mgmt_cb() -> handle_assoc_cb()
+is what completes association and starts the 4-way handshake after the
+association response. This driver returned a constant cookie and never
+reported status, so a client got its association response, waited for EAPOL
+message 1, and re-associated until it gave up (hardware-observed 2026-10-09).
+
+Hand out unique cookies and report "acked" as soon as the firmware has
+accepted the frame, for both the AP-handled and the generic STA_MGMT_TX
+paths; this mirrors esp-hosted NG, whose slave answers "mgmt tx done" and
+whose host driver calls cfg80211_mgmt_tx_status on it.
+---
+ driver/trellis_wifi_sta.c | 36 +++++++++++++++++++++++++++++++-----
+ 1 file changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/driver/trellis_wifi_sta.c b/driver/trellis_wifi_sta.c
+index 751e0d2..b7a161c 100644
+--- a/driver/trellis_wifi_sta.c
++++ b/driver/trellis_wifi_sta.c
+@@ -3,6 +3,7 @@
+ 
+ #include "trellis_wifi_sta.h"
+ 
++#include <linux/atomic.h>
+ #include <linux/build_bug.h>
+ #include <linux/etherdevice.h>
+ #include <linux/ieee80211.h>
+@@ -295,6 +296,24 @@ int trellis_wifi_sta_assoc_op(struct wiphy *wiphy, struct net_device *dev,
+ 	return ret;
+ }
+ 
++static atomic64_t trellis_mgmt_tx_cookie = ATOMIC64_INIT(0);
++
++/* The firmware answers the CONTROL request once the frame is queued for
++ * transmission; there is no per-frame ack path (esp-hosted NG's slave
++ * reports "mgmt tx done" the same way and its host driver turns it into
++ * cfg80211_mgmt_tx_status). hostapd/wpa_supplicant's AP code needs that
++ * status: ieee802_11_mgmt_cb() -> handle_assoc_cb() is what marks a
++ * station associated and starts the 4-way handshake after the association
++ * response goes out. Without it a client associates, waits for EAPOL
++ * message 1 that never comes, and re-associates until it gives up
++ * (hardware-observed 2026-10-09). */
++static void trellis_wifi_mgmt_tx_report(struct wireless_dev *wdev, u64 cookie,
++					const struct cfg80211_mgmt_tx_params *params)
++{
++	cfg80211_mgmt_tx_status(wdev, cookie, params->buf, params->len, true,
++				GFP_KERNEL);
++}
++
+ int trellis_wifi_sta_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 				struct cfg80211_mgmt_tx_params *params,
+ 				u64 *cookie)
+@@ -306,18 +325,23 @@ int trellis_wifi_sta_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	int arglen;
+ 	int ret;
+ 
+-	/* Cookie is opaque to userspace; a constant is fine as we never issue
+-	 * an async TX-status/cancel for it. */
+-	if (cookie)
+-		*cookie = 1;
++	/* Userspace matches the TX-status event below against this cookie, so
++	 * it has to be unique per request (the kernel also rejects a cookie of
++	 * 0 for the status event). */
++	*cookie = atomic64_inc_return(&trellis_mgmt_tx_cookie);
++	if (*cookie == 0)
++		*cookie = atomic64_inc_return(&trellis_mgmt_tx_cookie);
+ 
+ 	/* Shared wiphy op: the AP netdev lands here too. Its deauth/disassoc
+ 	 * traffic must not reach STA_MGMT_TX (see trellis_wifi_ap_mgmt_tx_op);
+ 	 * anything it does not handle falls through to the generic path. */
+ 	if (wdev->iftype == NL80211_IFTYPE_AP) {
+ 		ret = trellis_wifi_ap_mgmt_tx_op(wiphy, wdev, params);
+-		if (ret != TRELLIS_WIFI_AP_MGMT_TX_PASS)
++		if (ret != TRELLIS_WIFI_AP_MGMT_TX_PASS) {
++			if (ret == 0)
++				trellis_wifi_mgmt_tx_report(wdev, *cookie, params);
+ 			return ret;
++		}
+ 	}
+ 
+ 	if (params->len > TRELLIS_MLME_FRAME_MAX)
+@@ -342,6 +366,8 @@ int trellis_wifi_sta_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 
+ 	ret = trellis_wifi_sta_ctrl(sta, TRELLIS_CTRL_STA_MGMT_TX, args,
+ 				    (u16)arglen);
++	if (ret == 0)
++		trellis_wifi_mgmt_tx_report(wdev, *cookie, params);
+ 	return ret;
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

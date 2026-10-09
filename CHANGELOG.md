@@ -12,6 +12,69 @@ follows:
    releases, and Linux kernel updates. They're also made to fix bugs and add
    features to the build infrastructure.
 
+## v0.5.0-mm.3
+
+Replace ESP-Hosted-NG with [trellis-radio](https://pushin.eu/gus/trellis-radio)
+(pinned to `f6f3582`) for the ESP32-C6 radio.
+
+IMPORTANT: Requires a matching light_controller_firmware release. The app's
+`Firmware.InitEsp32`/`Firmware.FlashEsp32` bring-up must be removed and the AP
+moved to `wlan1`; the old app on this system will fail to open `ESP_RESET`.
+
+* Changes
+  * `package/trellis_radio` (kernel module built from the pushin.eu git repo over
+    https) replaces `package/esp-hosted` + `patches/esp-hosted`.
+  * The ESP32-C6 firmware is now a single merged image shipped at
+    `/lib/firmware/trellis_radio_fw.bin`, and the driver reflashes the chip
+    **over SDIO** whenever the running version differs
+    (`/etc/modprobe.d/trellis_radio.conf` sets `fw_autoupdate=1`). First boot
+    on a unit still running esp-hosted firmware reflashes it (~45 s). No UART
+    flashing or ESP-IDF blobs in the app any more.
+  * `trellis_radio` is loaded from `pre-run.sh` before the BEAM starts.
+  * Device tree: `ESP_RESET` (PG11) is an `mmc-pwrseq-simple` node on `mmc1`
+    and `ESP_BOOT` (PG10) is `boot-gpios` on a `trellis-radio@1` child. Both
+    lines are kernel-owned; userspace uses the driver's `esp32_boot_mode`
+    sysfs attribute instead of GPIO.
+  * Interfaces: `wlan0` is WiFi STA only, `wlan1` is the AP, `hci0` is BLE
+    over SDIO (UART3 is no longer used for Bluetooth), `wpan0` is 802.15.4.
+    STA and AP are mutually exclusive roles in the firmware.
+  * Kernel: `CONFIG_IEEE802154=y`, `CONFIG_MAC802154=y`, `CONFIG_CRYPTO_MD5=y`.
+  * Driver patches in `package/trellis_radio/*.patch`, exported from our fork
+    of trellis-radio (`../trellis-radio`, branch `mm-ap-mode` on top of
+    `f6f3582`), needed for wpa_supplicant 2.12 to run the AP:
+    * `WIPHY_FLAG_REPORTS_OBSS`: host-SME hostapd/wpa_supplicant register for
+      OBSS beacons before `START_AP` and abort if the kernel refuses; without
+      the flag the SSID is never advertised ("Failed to set beacon parameters").
+    * `.del_key` answered locally (firmware ignores it) so wpa_supplicant's
+      six startup key flushes no longer eat ~3 s of control pacing and trip
+      VintageNet's 3 s control-socket wait into a restart loop.
+    * `.mgmt_tx` on the AP netdev handles deauth/disassoc itself (broadcast
+      completes locally, unicast maps to `AP_DEAUTH_STA`) instead of sending
+      them on the firmware's STA interface, which stalled the firmware's
+      control task, timed out the GTK install, and ended in the TX
+      credit-starvation wedge.
+    Later commits in the same fork (all in `package/trellis_radio/*.patch`):
+    diagnostic `ap_host_ies` module parameter; AP_ADD_STATION now carries
+    the client's supported-rates/HT/VHT/HE IEs (a node added without them is
+    an 11b station that never gets its association response); management
+    frame TX status is reported to cfg80211 (hostapd only completes
+    association and starts the 4-way handshake on that status).
+  * `rootfs_overlay/lib/firmware/trellis_radio_fw.bin` is now built from the
+    fork (`trellis-radio/firmware`, see its README) on ESP-IDF v5.5.1 with
+    esp-hosted NG's patched Wi-Fi libraries. The upstream blob was built on
+    stock IDF, whose libraries lack the beacon-slot and AP management-TX
+    hooks the host-SME design needs: it never beaconed a usable frame.
+    Firmware fixes: AP-sourced management frames go out via
+    `ieee80211_send_mgmt_internal(WIFI_IF_AP)` instead of the STA path (which
+    hung the Wi-Fi task); the merged image now depends on the binaries it
+    merges.
+    Proposed upstream as https://pushin.eu/gus/trellis-radio/pulls/3 (fork
+    `captchrisd/trellis-radio`, branch `mm-ap-mode`, 16 commits); the patches and
+    blob here are generated from that branch head.
+  * `BR2_GLOBAL_PATCH_DIR` is back to upstream's value and `patches/` is gone;
+    the fork no longer carries any Buildroot package patches, so
+    `mix nerves.system.lint` passes again.
+
 ## v0.5.0-mm.2
 
 * Changes

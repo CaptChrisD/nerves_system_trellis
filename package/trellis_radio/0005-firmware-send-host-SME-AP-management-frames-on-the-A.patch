@@ -1,0 +1,56 @@
+From 57679d663e6e3a4fbb67e1ea90a4701514d79561 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 22:56:37 -0500
+Subject: [PATCH 05/16] firmware: send host-SME AP management frames on the AP
+ interface
+
+trellis_wifi_host_mgmt_tx always queued the host's frame on WIFI_IF_STA. In
+AP-only mode that interface is not running, and libnet80211's
+wifi_send_mgmt_frame spins on it: the wifi task trips the task watchdog
+every 5 s and the SoftAP goes silent. Observed on the first real client
+association (Trellis F-Series, 2026-10-09): the station reached AUTH (the
+auth response happened to go out), then the assoc response hung the chip.
+
+Pick the interface from the frame's source address: frames the host sends
+as the SoftAP (SA == AP MAC) go out on WIFI_IF_AP; everything else keeps the
+STA path.
+---
+ firmware/main/trellis_wifi_host.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index 2a69eb9..bda9318 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -21,6 +21,7 @@
+ #include "trellis_key.h"
+ #include "trellis_mlme.h"
+ #include "trellis_tx.h"
++#include "trellis_wifi_common.h"
+ 
+ static const char *TAG = "trellis_wifi_host";
+ 
+@@ -501,7 +502,20 @@ uint8_t trellis_wifi_host_mgmt_tx(const uint8_t *args, uint16_t arglen)
+     req = malloc(sizeof(*req) + t.frame_len);
+     if (!req)
+         return TRELLIS_CTRL_ERR_ERADIO;
++    /* Transmit on the interface the frame is sent from. The host authenticator
++     * (hostapd/wpa_supplicant AP mode) sends auth/assoc responses with the
++     * SoftAP's MAC as the source address; handing those to WIFI_IF_STA while
++     * only the AP role is active spins libnet80211's wifi_send_mgmt_frame
++     * forever (task watchdog on the wifi task, hardware-observed 2026-10-09,
++     * first client association). STA-SME frames keep WIFI_IF_STA. */
+     req->ifx = WIFI_IF_STA;
++    if (trellis_wifi_has_role(TRELLIS_WIFI_ROLE_AP)) {
++        uint8_t ap_mac[MAC_ADDR_LEN];
++
++        if (esp_wifi_get_mac(WIFI_IF_AP, ap_mac) == ESP_OK &&
++            memcmp(&t.frame[10], ap_mac, MAC_ADDR_LEN) == 0)
++            req->ifx = WIFI_IF_AP;
++    }
+     req->subtype = (uint8_t)((t.frame[0] >> 4) & 0x0fu);
+     req->data_len = t.frame_len;
+     memcpy(req->da, &t.frame[4], MAC_ADDR_LEN);
+-- 
+2.50.1 (Apple Git-155)
+

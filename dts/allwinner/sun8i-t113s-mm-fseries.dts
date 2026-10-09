@@ -24,7 +24,7 @@
 		serial4 = &uart4;
 		/*
 		 * Pin MMC controller indices so the on-board storage chip is always
-		 * mmcblk0 and the ESP-Hosted SDIO WiFi is always mmcblk1. Without
+		 * mmcblk0 and the trellis_radio SDIO radio is always mmcblk1. Without
 		 * these aliases the Linux MMC core assigns host->index by probe
 		 * completion order, which races between the two controllers.
 		 */
@@ -122,6 +122,17 @@
 		enable-active-high;
 		startup-delay-us = <1000>;
 		regulator-boot-on;
+	};
+
+	/* ESP32-C6 reset (ESP_RESET, PG11). Owned by the kernel: trellis_radio
+	 * resets the chip only through mmc_hw_reset(), which walks this node.
+	 * Timing per trellis-radio docs/devicetree.md (reset must be actively
+	 * driven; floating release never produced a working reset). */
+	esp32_pwrseq: pwrseq-esp32 {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&pio 6 11 GPIO_ACTIVE_LOW>; /* PG11 ESP_RESET */
+		power-off-delay-us = <2000000>;
+		post-power-on-delay-ms = <1500>;
 	};
 };
 
@@ -311,14 +322,14 @@
 	 */
 };
 
-/* ESP-Hosted control */
+/* ESP32-C6 console UART (debug only; trellis_radio talks over SDIO) */
 &uart1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart1_pg6_pins>;
 	status = "okay";
 };
 
-/* Bluetooth (ESP-Hosted) */
+/* UART3 to the ESP32-C6. Unused: BLE arrives over SDIO as hci0 via trellis_radio. */
 &uart3 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&uart3_pg_pins>;
@@ -334,7 +345,18 @@
 	no-1-8-v;
 	pinctrl-names = "default";
 	pinctrl-0 = <&mmc1_pins>;
+	mmc-pwrseq = <&esp32_pwrseq>;
 	status = "okay";
+
+	/* ESP32-C6 radio co-processor (trellis_radio). Binding is by SDIO
+	 * vendor/device id; this node only attaches the of_node so the driver
+	 * can claim ESP_BOOT. Both ESP lines are kernel-owned from here on:
+	 * userspace goes through the esp32_boot_mode sysfs attribute. */
+	trellis-radio@1 {
+		compatible = "protolux,trellis-radio";
+		reg = <1>;
+		boot-gpios = <&pio 6 10 GPIO_ACTIVE_LOW>; /* PG10 ESP_BOOT */
+	};
 };
 
 &emac {

@@ -1,0 +1,33 @@
+From 426774bdc9ec2360d642db3283d87a272c833edb Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 22:58:07 -0500
+Subject: [PATCH 06/16] firmware: make the merged image depend on the binaries
+ it merges
+
+With only target-level DEPENDS, ninja did not re-run merge_bin after
+trellis_wifi_host.c changed and trellis_radio.bin was relinked, so
+trellis_radio_fw.bin stayed stale. Depend on the actual .bin files.
+---
+ firmware/CMakeLists.txt | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/firmware/CMakeLists.txt b/firmware/CMakeLists.txt
+index 706d037..6476c18 100644
+--- a/firmware/CMakeLists.txt
++++ b/firmware/CMakeLists.txt
+@@ -21,7 +21,12 @@ set(TRELLIS_FW_IMAGE "${trellis_build_dir}/trellis_radio_fw.bin")
+ add_custom_command(
+     OUTPUT "${TRELLIS_FW_IMAGE}"
+     COMMAND ${trellis_python} ${trellis_esptool} --chip ${trellis_target} merge_bin -o "${TRELLIS_FW_IMAGE}" "@flash_args"
++    # Depend on the files, not only the targets: a target-only DEPENDS let
++    # ninja skip the merge after the app binary changed (stale image shipped).
+     DEPENDS gen_project_binary bootloader
++            "${trellis_build_dir}/${CMAKE_PROJECT_NAME}.bin"
++            "${trellis_build_dir}/bootloader/bootloader.bin"
++            "${trellis_build_dir}/partition_table/partition-table.bin"
+     WORKING_DIRECTORY "${trellis_build_dir}"
+     COMMENT "Merging bootloader+partition-table+app into trellis_radio_fw.bin"
+     VERBATIM
+-- 
+2.50.1 (Apple Git-155)
+

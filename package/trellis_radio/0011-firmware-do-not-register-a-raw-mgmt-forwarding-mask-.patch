@@ -1,0 +1,46 @@
+From b593a3e6365d02a88375b777c86979ea11e3a7b7 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 09:22:39 -0500
+Subject: [PATCH 11/16] firmware: do not register a raw mgmt forwarding mask
+ for the SoftAP
+
+esp-hosted NG feeds hostapd's auth/assoc/action frames through the
+wpa_ap_rx_mgmt callback its patched libnet80211 calls from the SoftAP SME;
+it only uses esp_wifi_register_mgmt_frame_internal() for STA-side
+scan/assoc frames. Registering the AP subtypes there as well made the
+library hand the frames over raw and skip its own station admission: the
+host-added node never became a real associated station
+(esp_wifi_ap_get_sta_aid "not found"), and EAPOL message 1 was never
+transmitted, so clients looped on auth/assoc (hardware-observed
+2026-10-09).
+---
+ firmware/main/trellis_wifi_ap.c | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/firmware/main/trellis_wifi_ap.c b/firmware/main/trellis_wifi_ap.c
+index 241b519..e965cb9 100644
+--- a/firmware/main/trellis_wifi_ap.c
++++ b/firmware/main/trellis_wifi_ap.c
+@@ -270,9 +270,16 @@ uint8_t trellis_wifi_ap_start(const uint8_t *args, uint16_t arglen)
+         return TRELLIS_CTRL_ERR_ERADIO;
+     }
+ 
+-    /* Forward auth/assoc/action mgmt frames to the host authenticator; the
+-     * wpa_ap_rx_mgmt callback (trellis_wifi_host.c) turns them into events. */
+-    esp_wifi_register_mgmt_frame_internal(TRELLIS_AP_MGMT_RX_MASK, 0);
++    /* The host authenticator receives auth/assoc/action/deauth frames through
++     * the wpa_ap_rx_mgmt callback (trellis_wifi_host.c), which esp-hosted
++     * NG's patched libnet80211 invokes from its SoftAP SME. Do NOT also
++     * register a raw forwarding mask (esp_wifi_register_mgmt_frame_internal)
++     * for these subtypes as earlier revisions did: esp-hosted only uses that
++     * mask for STA-side scan/assoc frames, and with it set in AP mode the
++     * library stops running station admission itself, so the associated
++     * client never gets a usable node - esp_wifi_ap_get_sta_aid() fails and
++     * EAPOL message 1 of the 4-way handshake is never transmitted
++     * (hardware-observed 2026-10-09). */
+ 
+     trellis_reassembly_reset(&s_ap_data_reasm);
+ 
+-- 
+2.50.1 (Apple Git-155)
+

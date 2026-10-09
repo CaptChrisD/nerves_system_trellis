@@ -1,0 +1,63 @@
+From 828ce7924be1108f24517fc8719ea9bfe4f89363 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 00:11:16 -0500
+Subject: [PATCH 10/16] docs: the firmware must be built on esp-hosted NG's
+ patched Wi-Fi libraries
+
+Stock ESP-IDF 5.5.1 lacks the beacon head/tail APPIE slots and
+ieee80211_send_mgmt_internal the host-SME model relies on; a stock build
+beacons nothing usable and never completes an association. Document the
+esp-hosted toolchain setup and how to tell the two apart.
+---
+ README.md | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/README.md b/README.md
+index 98787f4..2056442 100644
+--- a/README.md
++++ b/README.md
+@@ -41,11 +41,39 @@ everything above the driver - no bespoke radio API to integrate against.
+ 
+ ## Getting started
+ 
+-Firmware (ESP-IDF v6.0.2):
++### Firmware toolchain: ESP-IDF v5.5.1 with esp-hosted NG's Wi-Fi libraries
++
++The host-SME WiFi model (hostapd/wpa_supplicant on Linux run the AP
++authenticator and the STA SME) depends on hooks that only exist in the
++Wi-Fi libraries Espressif ships with **esp-hosted NG**, not in stock ESP-IDF:
++the `WIFI_APPIE_RAM_BEACON_PROBE_HEAD/TAIL` beacon slots and
++`ieee80211_send_mgmt_internal()` among them. A firmware built on stock IDF
++links fine but the SoftAP never beacons and clients can never associate
++(verified on hardware, 2026-10-09). Set the toolchain up exactly as
++esp-hosted does, on the same IDF commit:
++
++```sh
++git clone --branch v5.5.1 --depth 100 https://github.com/espressif/esp-idf.git ~/esp/esp-idf-v5.5.1
++cd ~/esp/esp-idf-v5.5.1
++git checkout -f fcae32885b0296b32044cb99ecbdc50d98dddb83
++git apply <esp-hosted>/esp_hosted_ng/esp/esp_driver/lib/rom.patch
++git submodule update --init --depth 1 --recursive
++./install.sh esp32c6
++rm -rf components/esp_wifi/lib/* && cp -r <esp-hosted>/esp_hosted_ng/esp/esp_driver/lib/* components/esp_wifi/lib/
++```
++
++(`<esp-hosted>` is a checkout of https://github.com/espressif/esp-hosted at
++`release/ng-1.0.6`; its `esp_hosted_ng/esp/esp_driver/.env` pins the IDF
++commit above.) A correctly built image contains the patched library's
++version string `d34ae1d`; stock IDF 5.5.1 reports `bad379d` on the ESP32's
++console at boot (`wifi firmware version:`).
++
++Build with the preset wrapper (`idf.py --preset` is an IDF 6 feature):
+ 
+ ```sh
++. ~/esp/esp-idf-v5.5.1/export.sh
+ cd firmware
+-idf.py --preset production build flash monitor
++./build.sh production build        # -> build/production/trellis_radio_fw.bin
+ ```
+ 
+ Kernel module, standalone out-of-tree build:
+-- 
+2.50.1 (Apple Git-155)
+

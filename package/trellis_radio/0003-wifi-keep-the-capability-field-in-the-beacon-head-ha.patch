@@ -1,0 +1,45 @@
+From 8c7a8d00ef46018697548e67982cde4d34307f93 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 22:03:38 -0500
+Subject: [PATCH 03/16] wifi: keep the capability field in the beacon head
+ handed to the firmware
+
+esp_wifi's WIFI_APPIE_RAM_BEACON_PROBE_HEAD template starts at the beacon's
+capability-info field, not at the first IE: esp-hosted NG's esp_set_ies
+strips 34 bytes (802.11 header + timestamp + interval) from cfg80211's head,
+and that is hardware-verified against real clients. This driver stripped 36,
+dropping the capability field too, so every IE in the firmware's beacon was
+shifted by two bytes. The AP reported "started" and wpa_supplicant/hostapd
+reached COMPLETED/ENABLED, but no scanner ever listed the SSID (open and
+WPA2 profiles alike, Trellis F-Series, 2026-10-08).
+---
+ driver/trellis_wifi_ap.c | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/driver/trellis_wifi_ap.c b/driver/trellis_wifi_ap.c
+index 6a65c4e..ec94996 100644
+--- a/driver/trellis_wifi_ap.c
++++ b/driver/trellis_wifi_ap.c
+@@ -23,10 +23,15 @@
+ 
+ #define TRELLIS_WIFI_AP_CTRL_TIMEOUT_MS 1000
+ 
+-/* Beacon head fixed-parameter length before the IEs start: the 24-byte 802.11
+- * mgmt header + 12-byte beacon fixed fields (timestamp+interval+capability).
+- * Matches esp-hosted's FIXED_PARAM_LEN. */
+-#define TRELLIS_AP_BEACON_FIXED_PARAM_LEN 36
++/* Bytes stripped from the front of cfg80211's beacon head before it goes to
++ * esp_wifi's WIFI_APPIE_RAM_BEACON_PROBE_HEAD slot: the 24-byte 802.11 header
++ * plus the 8-byte timestamp and 2-byte beacon interval. The 2-byte capability
++ * field stays: the slot's template starts at capability info, followed by the
++ * IEs (esp-hosted NG's esp_set_ies uses the same 34, hardware-verified there).
++ * Stripping the capability as well (36) shifts every IE by two bytes and the
++ * firmware beacons a frame no scanner accepts - the AP "starts" but is never
++ * seen. */
++#define TRELLIS_AP_BEACON_FIXED_PARAM_LEN 34
+ 
+ struct trellis_wifi_ap {
+ 	struct wiphy *wiphy;
+-- 
+2.50.1 (Apple Git-155)
+

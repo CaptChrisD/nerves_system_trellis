@@ -1,0 +1,41 @@
+From c2103872599e6f825342ab491480a2d9d3f24d2b Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 09:31:15 -0500
+Subject: [PATCH 15/16] firmware: build.sh always regenerates the merged image
+ after a build
+
+ninja still skips the merge_bin custom command after the app relinks in
+some runs, and the merged image is what the Linux driver flashes, so a
+stale one is shipped silently. Merge unconditionally after any build.
+---
+ firmware/build.sh | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/firmware/build.sh b/firmware/build.sh
+index 413fa85..3991ced 100755
+--- a/firmware/build.sh
++++ b/firmware/build.sh
+@@ -18,7 +18,19 @@ hitl) DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.hitl" ;;
+ 	;;
+ esac
+ BUILD_DIR="build/$PRESET"
+-exec idf.py -B "$BUILD_DIR" \
++idf.py -B "$BUILD_DIR" \
+ 	-D SDKCONFIG_DEFAULTS="$DEFAULTS" \
+ 	-D SDKCONFIG="$BUILD_DIR/sdkconfig" \
+ 	"$@"
++
++# Always (re)merge the flashable image after a build: ninja has been seen to
++# leave trellis_radio_fw.bin stale after the app relinks, and a stale merged
++# image is exactly what the Linux driver flashes. Idempotent and quick.
++case " $* " in
++*" build "*|*" all "*)
++	(cd "$BUILD_DIR" && python -m esptool --chip esp32c6 merge_bin -o trellis_radio_fw.bin \
++		--flash_mode dio --flash_freq 80m --flash_size 4MB \
++		0x0 bootloader/bootloader.bin 0x8000 partition_table/partition-table.bin \
++		0x10000 trellis_radio.bin)
++	;;
++esac
+-- 
+2.50.1 (Apple Git-155)
+

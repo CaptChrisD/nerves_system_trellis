@@ -1,0 +1,77 @@
+From 0673d690f6917917e97b3f4c673c86e36ff53666 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 09:30:31 -0500
+Subject: [PATCH 13/16] wifi: tunable CONTROL pacing (default 20 ms); only
+ forward AUTHORIZED station changes
+
+The 500 ms floor between CONTROL transactions made host-SME admission far
+too slow: a client's association request was answered ~1.5 s later (the
+pre-remove, add_station and response are each paced), by which time the
+client had restarted authentication, and EAPOL message 1 followed 2 s after
+that. Make the spacing a module parameter (ctrl_min_interval_ms, default
+20) so it can be tuned on hardware without a rebuild; the floor stays
+because back-to-back transactions have been seen to wedge the link.
+
+hostapd also calls change_station for every flag update during admission;
+each became an AP_ADD_STATION with aid 0 that re-created the node mid
+handshake. Forward only the AUTHORIZED transition the firmware acts on.
+---
+ driver/trellis_ctrl.c    | 14 ++++++++++++--
+ driver/trellis_wifi_ap.c |  9 +++++++++
+ 2 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/driver/trellis_ctrl.c b/driver/trellis_ctrl.c
+index be7e774..73a4885 100644
+--- a/driver/trellis_ctrl.c
++++ b/driver/trellis_ctrl.c
+@@ -9,6 +9,7 @@
+ #include <linux/mutex.h>
+ #include <linux/sched.h>
+ #include <linux/slab.h>
++#include <linux/moduleparam.h>
+ #include <linux/spinlock.h>
+ #include <linux/string.h>
+ #include <linux/wait.h>
+@@ -17,8 +18,17 @@
+ #include "trellis_datapath.h"
+ #include "trellis_frame.h"
+ 
+-/* Min spacing between CONTROL transaction starts; unthrottled wedges the SDIO link. */
+-#define TRELLIS_CTRL_MIN_INTERVAL_MS 500
++/* Min spacing between CONTROL transaction starts. Back-to-back transactions
++ * were observed to wedge the SDIO link, hence a floor; but 500 ms made the
++ * host-SME AP unusable: a client's association request was answered ~1.5 s
++ * later (pre-remove + add_station + response, each paced), after it had
++ * already restarted authentication (hardware-observed 2026-10-09). Runtime
++ * tunable: /sys/module/trellis_radio/parameters/ctrl_min_interval_ms. */
++static unsigned int ctrl_min_interval_ms = 20;
++module_param(ctrl_min_interval_ms, uint, 0644);
++MODULE_PARM_DESC(ctrl_min_interval_ms,
++		 "minimum spacing between CONTROL transactions in ms (default 20)");
++#define TRELLIS_CTRL_MIN_INTERVAL_MS ctrl_min_interval_ms
+ 
+ struct trellis_ctrl {
+ 	struct trellis_datapath *dp;
+diff --git a/driver/trellis_wifi_ap.c b/driver/trellis_wifi_ap.c
+index 01e83e3..9f1d444 100644
+--- a/driver/trellis_wifi_ap.c
++++ b/driver/trellis_wifi_ap.c
+@@ -432,6 +432,15 @@ int trellis_wifi_ap_change_station_op(struct wiphy *wiphy,
+ 	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_AP)
+ 		return 0;
+ 
++	/* hostapd changes a station's flags several times during admission
++	 * (clearing AUTH/ASSOC on re-auth, and so on). The only change the
++	 * firmware acts on is AUTHORIZED after the 4-way handshake; forwarding
++	 * the others became AP_ADD_STATION requests with aid 0 that re-created
++	 * the node mid-handshake (hardware-observed 2026-10-09). */
++	if (!(params->sta_flags_mask & BIT(NL80211_STA_FLAG_AUTHORIZED)) ||
++	    !(params->sta_flags_set & BIT(NL80211_STA_FLAG_AUTHORIZED)))
++		return 0;
++
+ 	return trellis_wifi_ap_add_station(priv->ap, mac, params);
+ }
+ 
+-- 
+2.50.1 (Apple Git-155)
+

@@ -1,0 +1,81 @@
+From 4270dba1d0a49c057084566019e67482c5689abd Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 23:02:37 -0500
+Subject: [PATCH 07/16] firmware: send SoftAP management frames via
+ ieee80211_send_mgmt_internal
+
+Routing the host authenticator's auth/assoc responses through
+esp_wifi_send_mgmt_frm_internal (the STA path) fails on the AP side:
+libnet80211 looks the destination up as a BSS node, which a peer that is
+still being admitted never is ("failed to find bss node"), so the client
+reaches AUTH and times out on association. esp-hosted NG's process_mgmt_tx
+uses ieee80211_send_mgmt_internal(WIFI_IF_AP, ...) for exactly this; do
+the same for frames whose source address is the SoftAP's MAC.
+---
+ firmware/main/trellis_wifi_host.c | 35 +++++++++++++++++++------------
+ 1 file changed, 22 insertions(+), 13 deletions(-)
+
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index bda9318..fdc09fa 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -488,10 +488,18 @@ uint8_t trellis_wifi_host_sta_assoc(const uint8_t *args, uint16_t arglen)
+     return TRELLIS_CTRL_ERR_OK;
+ }
+ 
++/* esp-hosted NG's patched libnet80211 exports this for host-SME AP frames
++ * (auth/assoc responses, action frames). esp_wifi_send_mgmt_frm_internal is
++ * the STA-side path: it looks the DA up as a BSS node, which an AP's not-yet-
++ * admitted peer never is ("failed to find bss node"), and on an idle STA
++ * interface it spins the wifi task. */
++extern int ieee80211_send_mgmt_internal(wifi_interface_t wifi_if_type, uint8_t *buf, size_t len);
++
+ uint8_t trellis_wifi_host_mgmt_tx(const uint8_t *args, uint16_t arglen)
+ {
+     struct trellis_mlme_tx t;
+     wifi_mgmt_frm_req_t *req;
++    uint8_t ap_mac[MAC_ADDR_LEN];
+     esp_err_t err;
+ 
+     if (!s_wpa_registered)
+@@ -499,23 +507,24 @@ uint8_t trellis_wifi_host_mgmt_tx(const uint8_t *args, uint16_t arglen)
+     if (trellis_mlme_tx_decode(args, arglen, &t) != 0 || t.frame_len < IEEE80211_MGMT_HDR_LEN)
+         return TRELLIS_CTRL_ERR_EINVAL;
+ 
++    /* Frames the host authenticator sends as the SoftAP (SA == AP MAC) take
++     * the AP transmit path, exactly as esp-hosted NG's process_mgmt_tx does.
++     * Hardware-observed 2026-10-09: routed through the STA path they either
++     * hang the wifi task (task watchdog) or fail with "failed to find bss
++     * node", so a client reaches AUTH and never completes association. */
++    if (trellis_wifi_has_role(TRELLIS_WIFI_ROLE_AP) && esp_wifi_get_mac(WIFI_IF_AP, ap_mac) == ESP_OK &&
++        memcmp(&t.frame[10], ap_mac, MAC_ADDR_LEN) == 0) {
++        int ret = ieee80211_send_mgmt_internal(WIFI_IF_AP, t.frame, t.frame_len);
++
++        if (ret != 0)
++            ESP_LOGW(TAG, "AP mgmt tx failed: %d (subtype 0x%x)", ret, (t.frame[0] >> 4) & 0x0fu);
++        return ret == 0 ? TRELLIS_CTRL_ERR_OK : TRELLIS_CTRL_ERR_ERADIO;
++    }
++
+     req = malloc(sizeof(*req) + t.frame_len);
+     if (!req)
+         return TRELLIS_CTRL_ERR_ERADIO;
+-    /* Transmit on the interface the frame is sent from. The host authenticator
+-     * (hostapd/wpa_supplicant AP mode) sends auth/assoc responses with the
+-     * SoftAP's MAC as the source address; handing those to WIFI_IF_STA while
+-     * only the AP role is active spins libnet80211's wifi_send_mgmt_frame
+-     * forever (task watchdog on the wifi task, hardware-observed 2026-10-09,
+-     * first client association). STA-SME frames keep WIFI_IF_STA. */
+     req->ifx = WIFI_IF_STA;
+-    if (trellis_wifi_has_role(TRELLIS_WIFI_ROLE_AP)) {
+-        uint8_t ap_mac[MAC_ADDR_LEN];
+-
+-        if (esp_wifi_get_mac(WIFI_IF_AP, ap_mac) == ESP_OK &&
+-            memcmp(&t.frame[10], ap_mac, MAC_ADDR_LEN) == 0)
+-            req->ifx = WIFI_IF_AP;
+-    }
+     req->subtype = (uint8_t)((t.frame[0] >> 4) & 0x0fu);
+     req->data_len = t.frame_len;
+     memcpy(req->da, &t.frame[4], MAC_ADDR_LEN);
+-- 
+2.50.1 (Apple Git-155)
+

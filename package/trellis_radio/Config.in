@@ -1,0 +1,8 @@
+config BR2_PACKAGE_TRELLIS_RADIO
+	bool "trellis_radio"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Linux driver for the Trellis Radio ESP32C6 SDIO co-processor.
+
+comment "trellis_radio needs a Linux kernel to be built"
+	depends on !BR2_LINUX_KERNEL

@@ -1,0 +1,51 @@
+From 4ee97366432606e716ab4a01c28081f42b801684 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Fri, 9 Oct 2026 09:30:31 -0500
+Subject: [PATCH 14/16] firmware: deauth of an unknown station is a no-op;
+ ignore AID-0 station adds
+
+hostapd deauthenticates stations it never finished admitting (its routine
+pre-remove before add_station, and after a failed handshake); returning
+ERADIO turned those into -EIO on the host for no gain. And a bare flag
+update without an AID must not re-create the node.
+---
+ firmware/main/trellis_wifi_ap.c   | 7 +++++--
+ firmware/main/trellis_wifi_host.c | 4 ++++
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/firmware/main/trellis_wifi_ap.c b/firmware/main/trellis_wifi_ap.c
+index 9bd232a..994d00e 100644
+--- a/firmware/main/trellis_wifi_ap.c
++++ b/firmware/main/trellis_wifi_ap.c
+@@ -340,8 +340,11 @@ uint8_t trellis_wifi_ap_deauth_sta(const uint8_t mac[6])
+      * aid, not a MAC). A missing station surfaces as ERADIO, not a no-op. */
+     err = esp_wifi_ap_get_sta_aid(mac, &aid);
+     if (err != ESP_OK) {
+-        ESP_LOGW(TAG, "esp_wifi_ap_get_sta_aid failed: %d", err);
+-        return TRELLIS_CTRL_ERR_ERADIO;
++        /* hostapd deauthenticates stations it never finished admitting (its
++         * routine pre-remove before add, failed handshakes). Nothing to tell
++         * the radio: that is a successful no-op, not an error. */
++        ESP_LOGD(TAG, "deauth: station unknown (%d)", err);
++        return TRELLIS_CTRL_ERR_OK;
+     }
+ 
+     err = esp_wifi_deauth_sta(aid);
+diff --git a/firmware/main/trellis_wifi_host.c b/firmware/main/trellis_wifi_host.c
+index 8a0a54d..1fe6eca 100644
+--- a/firmware/main/trellis_wifi_host.c
++++ b/firmware/main/trellis_wifi_host.c
+@@ -699,6 +699,10 @@ uint8_t trellis_wifi_host_ap_add_station(const uint8_t *args, uint16_t arglen)
+         esp_wifi_wpa_ptk_init_done_internal(s.mac);
+         return TRELLIS_CTRL_ERR_OK;
+     }
++    /* A bare flag update (no AUTHORIZED, no AID) is not an admission; never
++     * re-create a node for it. */
++    if (s.aid == 0)
++        return TRELLIS_CTRL_ERR_OK;
+ 
+     /* Create the node with the client's rate set and HT/VHT/HE capability
+      * IEs the host authenticator parsed from its association request (same
+-- 
+2.50.1 (Apple Git-155)
+

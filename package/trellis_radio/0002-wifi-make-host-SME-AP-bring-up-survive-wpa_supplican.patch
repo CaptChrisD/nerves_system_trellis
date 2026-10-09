@@ -1,0 +1,179 @@
+From f3aeee31b6455c8558014f217bf95046edeef5c1 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 19:16:56 -0500
+Subject: [PATCH 02/16] wifi: make host-SME AP bring-up survive
+ wpa_supplicant's startup sequence
+
+Two startup problems seen with wpa_supplicant 2.12 driving wlan1 as an AP
+(mode=2) under VintageNet on a Trellis F-Series:
+
+1. .del_key round-tripped to the firmware, whose STA/AP_DEL_KEY handlers are
+   explicit no-ops. wpa_supplicant flushes six key slots at interface init
+   before creating its control socket; with TRELLIS_CTRL_MIN_INTERVAL_MS
+   pacing that is ~3 s, which is exactly VintageNet's socket wait, so it
+   restarted wpa_supplicant in a loop. Answer .del_key locally.
+
+2. .mgmt_tx on the AP netdev sent hostapd's broadcast "deauthenticate all
+   stations" frame through STA_MGMT_TX, i.e. on the firmware's STA
+   interface, which is not running in AP mode. The firmware never answered,
+   the control task stayed stuck past the next request, and the GTK install
+   that follows START_AP timed out ("key addition failed ... -110"), failing
+   AP setup. Repeated restarts then ended in the TX credit-starvation wedge.
+   Handle deauth/disassoc on the AP netdev in the driver: broadcast (or AP
+   not running) completes locally, unicast maps to AP_DEAUTH_STA. Other
+   management frames keep the generic path.
+---
+ driver/trellis_wifi_ap.c  | 49 +++++++++++++++++++++++++++++++++++++++
+ driver/trellis_wifi_ap.h  |  9 +++++++
+ driver/trellis_wifi_sta.c | 43 ++++++++++++++--------------------
+ 3 files changed, 76 insertions(+), 25 deletions(-)
+
+diff --git a/driver/trellis_wifi_ap.c b/driver/trellis_wifi_ap.c
+index e56ed2a..6a65c4e 100644
+--- a/driver/trellis_wifi_ap.c
++++ b/driver/trellis_wifi_ap.c
+@@ -408,6 +408,55 @@ int trellis_wifi_ap_del_station_op(struct wiphy *wiphy, struct net_device *dev,
+ 	return 0;
+ }
+ 
++/* ---- cfg80211 .mgmt_tx (AP netdev) ---- */
++
++/* hostapd/wpa_supplicant send a broadcast deauth when the BSS comes up and
++ * goes down ("Deauthenticate all stations"), and a unicast deauth/disassoc
++ * when they evict a client. Routed through STA_MGMT_TX these frames go out
++ * on the firmware's STA interface, which is not running in AP mode: the
++ * firmware never answers, the 1 s CONTROL timeout fires, and the control
++ * task stays stuck long enough to time out the GTK install that follows
++ * (hardware-observed 2026-10-08, "key addition failed ... -110", followed by
++ * the TX credit-starvation wedge). The firmware already owns both cases:
++ * a broadcast deauth with no admitted stations is a no-op, and a unicast one
++ * is exactly AP_DEAUTH_STA. Everything else (auth/assoc responses, action
++ * frames) still takes the generic path. */
++int trellis_wifi_ap_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
++			       struct cfg80211_mgmt_tx_params *params)
++{
++	struct trellis_wifi_ap_priv *priv = netdev_priv(wdev->netdev);
++	struct trellis_wifi_ap *ap = priv->ap;
++	const struct ieee80211_mgmt *mgmt;
++	unsigned long flags;
++	bool running;
++	u8 status;
++	int ret;
++
++	if (params->len < sizeof(struct ieee80211_hdr_3addr))
++		return -EINVAL;
++	mgmt = (const struct ieee80211_mgmt *)params->buf;
++
++	if (!ieee80211_is_deauth(mgmt->frame_control) &&
++	    !ieee80211_is_disassoc(mgmt->frame_control))
++		return TRELLIS_WIFI_AP_MGMT_TX_PASS;
++
++	spin_lock_irqsave(&ap->state_lock, flags);
++	running = ap->running;
++	spin_unlock_irqrestore(&ap->state_lock, flags);
++
++	/* Nothing on air to tell, or nobody in particular: report sent. */
++	if (!running || is_broadcast_ether_addr(mgmt->da))
++		return 0;
++
++	ret = trellis_ctrl_request(ap->ctrl, TRELLIS_CTRL_AP_DEAUTH_STA, mgmt->da,
++				   ETH_ALEN, &status,
++				   TRELLIS_WIFI_AP_CTRL_TIMEOUT_MS, NULL, NULL);
++	if (ret)
++		return ret;
++	/* An unknown station is not an error for a deauth. */
++	return 0;
++}
++
+ /* Fetches a fresh AP_LIST_STA response into `ap->clients`/`num_clients`.
+  * Not state_lock-protected: all callers are cfg80211 ops serialized under
+  * rtnl_lock, and trellis_ctrl_request() sleeps so can't hold a spinlock. */
+diff --git a/driver/trellis_wifi_ap.h b/driver/trellis_wifi_ap.h
+index bdad5f0..f9a8187 100644
+--- a/driver/trellis_wifi_ap.h
++++ b/driver/trellis_wifi_ap.h
+@@ -49,4 +49,13 @@ int trellis_wifi_ap_dump_station_op(struct wiphy *wiphy, struct net_device *dev,
+ 				    int idx, u8 *mac,
+ 				    struct station_info *sinfo);
+ 
++/* .mgmt_tx for the AP netdev. Returns TRELLIS_WIFI_AP_MGMT_TX_PASS when the
++ * frame is not one it handles, so the caller can fall through to the generic
++ * STA_MGMT_TX path. */
++#define TRELLIS_WIFI_AP_MGMT_TX_PASS 1
++struct wireless_dev;
++struct cfg80211_mgmt_tx_params;
++int trellis_wifi_ap_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
++			       struct cfg80211_mgmt_tx_params *params);
++
+ #endif /* TRELLIS_WIFI_AP_H */
+diff --git a/driver/trellis_wifi_sta.c b/driver/trellis_wifi_sta.c
+index 840cdab..751e0d2 100644
+--- a/driver/trellis_wifi_sta.c
++++ b/driver/trellis_wifi_sta.c
+@@ -22,6 +22,7 @@
+ #include "trellis_key.h"
+ #include "trellis_mlme.h"
+ #include "trellis_sta.h"
++#include "trellis_wifi_ap.h"
+ 
+ #define TRELLIS_WIFI_STA_CTRL_TIMEOUT_MS 1000
+ 
+@@ -310,6 +311,15 @@ int trellis_wifi_sta_mgmt_tx_op(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 	if (cookie)
+ 		*cookie = 1;
+ 
++	/* Shared wiphy op: the AP netdev lands here too. Its deauth/disassoc
++	 * traffic must not reach STA_MGMT_TX (see trellis_wifi_ap_mgmt_tx_op);
++	 * anything it does not handle falls through to the generic path. */
++	if (wdev->iftype == NL80211_IFTYPE_AP) {
++		ret = trellis_wifi_ap_mgmt_tx_op(wiphy, wdev, params);
++		if (ret != TRELLIS_WIFI_AP_MGMT_TX_PASS)
++			return ret;
++	}
++
+ 	if (params->len > TRELLIS_MLME_FRAME_MAX)
+ 		return -EINVAL;
+ 
+@@ -445,31 +455,14 @@ int trellis_wifi_sta_del_key_op(struct wiphy *wiphy, struct net_device *netdev,
+ 				int link_id, u8 key_index, bool pairwise,
+ 				const u8 *mac_addr)
+ {
+-	struct trellis_wifi_sta_priv *priv = netdev_priv(netdev);
+-	struct trellis_wifi_sta *sta = priv->sta;
+-	struct trellis_key key = { 0 };
+-	u8 args[TRELLIS_KEY_ARGS_MAX];
+-	bool is_ap;
+-	int arglen;
+-
+-	is_ap = netdev->ieee80211_ptr->iftype == NL80211_IFTYPE_AP;
+-
+-	key.index = key_index;
+-	key.flags = TRELLIS_KEY_FLAG_DELETE;
+-	if (pairwise)
+-		key.flags |= TRELLIS_KEY_FLAG_PAIRWISE;
+-	if (pairwise && mac_addr)
+-		memcpy(key.mac_addr, mac_addr, ETH_ALEN);
+-	else
+-		eth_broadcast_addr(key.mac_addr);
+-
+-	arglen = trellis_key_encode(args, sizeof(args), &key);
+-	if (arglen < 0)
+-		return -EINVAL;
+-
+-	return trellis_wifi_sta_ctrl(
+-		sta, is_ap ? TRELLIS_CTRL_AP_DEL_KEY : TRELLIS_CTRL_STA_DEL_KEY,
+-		args, (u16)arglen);
++	/* The firmware's STA_DEL_KEY and AP_DEL_KEY handlers are deliberate
++	 * no-ops (esp_wifi ties key lifetime to the connection), so a CONTROL
++	 * round trip buys nothing and costs TRELLIS_CTRL_MIN_INTERVAL_MS of
++	 * pacing per call. wpa_supplicant flushes six key slots at interface
++	 * init, before it creates its control socket; those ~3 s of paced
++	 * round-trips were enough for VintageNet's 3 s socket wait to give up
++	 * and restart wpa_supplicant in a loop. Answer locally instead. */
++	return 0;
+ }
+ 
+ int trellis_wifi_sta_scan_op(struct wiphy *wiphy,
+-- 
+2.50.1 (Apple Git-155)
+

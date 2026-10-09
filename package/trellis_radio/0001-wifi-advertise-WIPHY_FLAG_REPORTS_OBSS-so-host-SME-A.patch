@@ -1,0 +1,41 @@
+From 6563dadbbdcd03990974ceb5b2ae7de990214763 Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@bigcove.io>
+Date: Thu, 8 Oct 2026 19:16:56 -0500
+Subject: [PATCH 01/16] wifi: advertise WIPHY_FLAG_REPORTS_OBSS so host-SME AP
+ can start
+
+The wiphy runs the AP in host-SME mode (no WIPHY_FLAG_HAVE_AP_SME). In that
+mode wpa_supplicant/hostapd 2.12 (driver_nl80211.c, wpa_driver_nl80211_set_ap)
+registers for OBSS beacons via NL80211_CMD_REGISTER_BEACONS before issuing
+START_AP and aborts with -ENOBUFS if that registration fails. cfg80211 only
+accepts the registration when the wiphy sets WIPHY_FLAG_REPORTS_OBSS, so
+without it every AP start ends in "Failed to set beacon parameters" and the
+SSID is never advertised. Observed on a Trellis F-Series with wpa_supplicant
+2.12 in AP mode (mode=2).
+
+Advertising the flag is harmless: the driver never calls
+cfg80211_report_obss_beacon(), so hostapd simply receives no OBSS beacons.
+---
+ driver/trellis_wifi_mon.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/driver/trellis_wifi_mon.c b/driver/trellis_wifi_mon.c
+index 5189540..9ff2789 100644
+--- a/driver/trellis_wifi_mon.c
++++ b/driver/trellis_wifi_mon.c
+@@ -408,6 +408,12 @@ struct trellis_wifi_mon *trellis_wifi_mon_register(struct trellis_datapath *dp,
+ 	 * WIPHY_FLAG_HAVE_AP_SME. Subscribe to the AP mgmt subtypes to forward. */
+ 	wiphy->mgmt_stypes = trellis_mgmt_stypes;
+ 	wiphy->max_ap_assoc_sta = TRELLIS_AP_MAX_CLIENTS;
++	/* Host-SME hostapd/wpa_supplicant (>= 2.12) register for OBSS beacons
++	 * (NL80211_CMD_REGISTER_BEACONS) before START_AP and abort the AP if
++	 * the kernel refuses; cfg80211 refuses unless this flag is set. We
++	 * never report OBSS beacons, so userspace just receives none. */
++	wiphy->flags |= WIPHY_FLAG_REPORTS_OBSS;
++
+ 
+ 	/* Scan support: 1 SSID (wildcard scan), generous ie_len (IEs ignored),
+ 	 * MBM so firmware's dBm RSSI reaches cfg80211_inform_bss() intact. */
+-- 
+2.50.1 (Apple Git-155)
+

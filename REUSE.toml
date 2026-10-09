@@ -39,6 +39,16 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "The Buildroot developers <buildroot@buildroot.org>"
 SPDX-License-Identifier = "GPL-2.0-or-later"
 
+# Trellis radio firmware blob and module load config
+[[annotations]]
+path = [
+ "rootfs_overlay/lib/firmware/trellis_radio_fw.bin",
+ "rootfs_overlay/etc/modprobe.d/trellis_radio.conf"
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2025 Gus Workman"
+SPDX-License-Identifier = "GPL-2.0-only"
+
 # Linux and U-Boot derived or related files
 [[annotations]]
 path = [
