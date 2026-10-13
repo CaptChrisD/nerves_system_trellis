@@ -1,0 +1,183 @@
+From 3edc1337974d036fa7f49844184e611ee197a55d Mon Sep 17 00:00:00 2001
+From: Chris Dutton <chris@aquatic-edge.com>
+Date: Tue, 13 Oct 2026 11:00:26 -0500
+Subject: [PATCH] wifi: report STA link loss as a deauth to the host SME and
+ disable power save
+
+---
+ driver/trellis_wifi_sta.c           | 93 ++++++++++++++++++++++++++---
+ firmware/main/trellis_wifi_common.c |  5 ++
+ 2 files changed, 89 insertions(+), 9 deletions(-)
+
+diff --git a/driver/trellis_wifi_sta.c b/driver/trellis_wifi_sta.c
+index b7a161c..8c10ed4 100644
+--- a/driver/trellis_wifi_sta.c
++++ b/driver/trellis_wifi_sta.c
+@@ -13,6 +13,7 @@
+ #include <linux/slab.h>
+ #include <linux/spinlock.h>
+ #include <linux/unaligned.h>
++#include <linux/workqueue.h>
+ #include <net/cfg80211.h>
+ 
+ #include "trellis_control.h"
+@@ -58,6 +59,18 @@ struct trellis_wifi_sta {
+ 	 * in trellis_wifi_sta_on_connected(). */
+ 	u8 ssid[TRELLIS_STA_SSID_MAX];
+ 	u8 ssid_len;
++
++	/* BSSID of the AP the firmware last reported STA_CONNECTED for; the
++	 * synthesized deauth in link_lost_work is addressed from it. */
++	u8 bssid[ETH_ALEN];
++
++	/* Firmware STA_DISCONNECTED while associated. The EVENT callback runs
++	 * on the datapath RX thread, which also delivers CONTROL replies that
++	 * cfg80211 ops block on while holding the wiphy lock - so the report
++	 * (which needs that lock) is deferred to this work item. */
++	struct work_struct link_lost_work;
++	u8 link_lost_bssid[ETH_ALEN];
++	u16 link_lost_reason;
+ };
+ 
+ struct trellis_wifi_sta_priv {
+@@ -553,6 +566,7 @@ static void trellis_wifi_sta_on_connected(void *ctx, const u8 *bssid,
+ 	spin_lock_irqsave(&sta->state_lock, flags);
+ 	was_connected = sta->connected;
+ 	sta->connected = true;
++	memcpy(sta->bssid, bssid, ETH_ALEN);
+ 	spin_unlock_irqrestore(&sta->state_lock, flags);
+ 
+ 	/* cfg80211 needs a resolvable BSS entry; synthesize one from this
+@@ -587,8 +601,61 @@ static void trellis_wifi_sta_on_connected(void *ctx, const u8 *bssid,
+ 	if (bss)
+ 		cfg80211_put_bss(sta->wiphy, bss);
+ 
+-	cfg80211_connect_result(sta->ndev, bssid, NULL, 0, NULL, 0,
+-				WLAN_STATUS_SUCCESS, GFP_KERNEL);
++	/* Nothing more to report for a first connection: this is a host-SME
++	 * driver (.auth/.assoc, no .connect), so the association was already
++	 * delivered via cfg80211_rx_assoc_resp() in trellis_wifi_sta_on_assoc_rx()
++	 * and the wdev is connected. Calling cfg80211_connect_result() here on
++	 * top of that trips WARN_ON_ONCE(!bss) in __cfg80211_connect_result()
++	 * (net/wireless/sme.c, the `!rdev->ops->connect` branch) on every connect. */
++}
++
++/* Deliver a firmware-reported link loss to cfg80211 as a deauth frame from the
++ * AP. wpa_supplicant runs its own SME against this driver (we expose
++ * .auth/.assoc, not .connect) and in that mode it deliberately ignores
++ * NL80211_CMD_DISCONNECT ("Ignore disconnect event when using userspace SME" in
++ * driver_nl80211_event.c), so cfg80211_disconnected() left the supplicant in
++ * COMPLETED forever with the kernel already at "Not connected" - the link never
++ * came back without a reboot. cfg80211_rx_mlme_mgmt(deauth) instead produces
++ * NL80211_CMD_DEAUTHENTICATE, which the SME handles and reconnects from. */
++static void trellis_wifi_sta_link_lost_work(struct work_struct *work)
++{
++	struct trellis_wifi_sta *sta =
++		container_of(work, struct trellis_wifi_sta, link_lost_work);
++	struct ieee80211_mgmt mgmt;
++	size_t len = offsetofend(struct ieee80211_mgmt, u.deauth.reason_code);
++	u8 bssid[ETH_ALEN];
++	u16 reason;
++	unsigned long flags;
++
++	/* Snapshot taken at disconnect time, not sta->bssid: a reconnect may
++	 * have landed before this work ran, and the deauth must name the lost AP. */
++	spin_lock_irqsave(&sta->state_lock, flags);
++	memcpy(bssid, sta->link_lost_bssid, ETH_ALEN);
++	reason = sta->link_lost_reason;
++	spin_unlock_irqrestore(&sta->state_lock, flags);
++
++	memset(&mgmt, 0, sizeof(mgmt));
++	mgmt.frame_control =
++		cpu_to_le16(IEEE80211_FTYPE_MGMT | IEEE80211_STYPE_DEAUTH);
++	memcpy(mgmt.da, sta->ndev->dev_addr, ETH_ALEN);
++	memcpy(mgmt.sa, bssid, ETH_ALEN);
++	memcpy(mgmt.bssid, bssid, ETH_ALEN);
++	mgmt.u.deauth.reason_code = cpu_to_le16(reason);
++
++	wiphy_lock(sta->wiphy);
++	cfg80211_rx_mlme_mgmt(sta->ndev, (const u8 *)&mgmt, len);
++	wiphy_unlock(sta->wiphy);
++}
++
++/* ESP-IDF wifi_err_reason_t: values below 200 are IEEE 802.11 reason codes
++ * passed through from the AP; 200+ are ESP-internal (BEACON_TIMEOUT=200,
++ * NO_AP_FOUND=201, AUTH_FAIL=202, ASSOC_FAIL=203, HANDSHAKE_TIMEOUT=204, ...)
++ * and have no 802.11 equivalent. */
++static u16 trellis_wifi_sta_esp_reason_to_80211(u8 reason)
++{
++	if (reason >= 1 && reason < 200)
++		return reason;
++	return WLAN_REASON_UNSPECIFIED;
+ }
+ 
+ static void trellis_wifi_sta_on_disconnected(void *ctx, u8 reason)
+@@ -600,20 +667,23 @@ static void trellis_wifi_sta_on_disconnected(void *ctx, u8 reason)
+ 	spin_lock_irqsave(&sta->state_lock, flags);
+ 	was_connected = sta->connected;
+ 	sta->connected = false;
++	if (was_connected) {
++		memcpy(sta->link_lost_bssid, sta->bssid, ETH_ALEN);
++		sta->link_lost_reason =
++			trellis_wifi_sta_esp_reason_to_80211(reason);
++	}
+ 	spin_unlock_irqrestore(&sta->state_lock, flags);
+ 
+ 	/* Reason is an ESP-IDF wifi_err_reason_t code. */
+ 	netdev_info(sta->ndev, "STA disconnected: reason=%u\n", reason);
+ 
+ 	/* A disconnect before any connected event means the connect itself
+-	 * failed - report a failed connect_result, not a link teardown. */
++	 * failed. The host SME owns auth/assoc timeouts for that case (the
++	 * auth/assoc frames, when the AP sent any, already went up via
++	 * sta_auth_rx/sta_assoc_rx), and cfg80211_connect_result() is not
++	 * valid for a .auth/.assoc driver - so there is nothing to report. */
+ 	if (was_connected)
+-		cfg80211_disconnected(sta->ndev, reason, NULL, 0, false,
+-				      GFP_KERNEL);
+-	else
+-		cfg80211_connect_result(sta->ndev, NULL, NULL, 0, NULL, 0,
+-					WLAN_STATUS_UNSPECIFIED_FAILURE,
+-					GFP_KERNEL);
++		schedule_work(&sta->link_lost_work);
+ }
+ 
+ /* SCAN FRAME: a raw beacon/probe-response body (fixed params + IEs). Parse the
+@@ -760,6 +830,7 @@ struct trellis_wifi_sta *trellis_wifi_sta_register(struct wiphy *wiphy,
+ 	sta->dp = dp;
+ 	sta->ctrl = ctrl;
+ 	spin_lock_init(&sta->state_lock);
++	INIT_WORK(&sta->link_lost_work, trellis_wifi_sta_link_lost_work);
+ 
+ 	ndev = alloc_netdev(sizeof(*priv), "wlan%d", NET_NAME_UNKNOWN,
+ 			    ether_setup);
+@@ -854,6 +925,10 @@ void trellis_wifi_sta_unregister(struct trellis_wifi_sta *sta)
+ 	trellis_channel_unregister(sta->dp, TRELLIS_CHANNEL_WIFI_STA_DATA);
+ 	trellis_evt_unregister_sta(sta->evt);
+ 
++	/* No more EVENTs can queue it after evt unregister; let a pending one
++	 * finish (it uses ndev/wiphy) before the netdev goes away. */
++	cancel_work_sync(&sta->link_lost_work);
++
+ 	/* Removal while connected must report disconnect, else cfg80211
+ 	 * WARN_ON()s on a STATION wdev still holding a BSS at unregister. */
+ 	spin_lock_irqsave(&sta->state_lock, flags);
+diff --git a/firmware/main/trellis_wifi_common.c b/firmware/main/trellis_wifi_common.c
+index ee2c2b5..7fca963 100644
+--- a/firmware/main/trellis_wifi_common.c
++++ b/firmware/main/trellis_wifi_common.c
+@@ -38,6 +38,11 @@ void trellis_wifi_common_init(void)
+     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL));
+     ESP_ERROR_CHECK(esp_wifi_start());
++    /* ESP-IDF defaults the STA to WIFI_PS_MIN_MODEM (sleep between DTIM
++     * beacons). On this always-powered gateway that only buys 100 ms-1 s
++     * latency spikes and, on the bench, a reason=200 BEACON_TIMEOUT drop of a
++     * -49 dBm link within a minute of associating. Keep the radio awake. */
++    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+ 
+     ESP_LOGI(TAG, "WiFi up (WIFI_MODE_NULL) - radio idle until SET_MONITOR/STA_CONNECT/AP_START");
+ }
+-- 
+2.50.1 (Apple Git-155)
+
